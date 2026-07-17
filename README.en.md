@@ -108,7 +108,7 @@ OneDB/
 
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/ly215684/OneDB
 cd OneDB
 
 # Install dependencies

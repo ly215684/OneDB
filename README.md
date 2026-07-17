@@ -108,7 +108,7 @@ OneDB/
 
 ```bash
 # 克隆项目
-git clone <repo-url>
+git clone https://github.com/ly215684/OneDB
 cd OneDB
 
 # 安装依赖

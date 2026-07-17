@@ -144,6 +144,11 @@
   "editor": {
     "execute": "Execute",
     "executeSelected": "Execute Selected",
+        "selectDatabase": "Select Database",
+    "loadingDatabases": "Loading...",
+    "noDatabases": "No databases available",
+    "selectConnection": "Select Connection",
+    "noConnections": "No connections available",
     "executeAll": "Execute All",
     "format": "Format",
     "clear": "Clear",
@@ -160,7 +165,9 @@
     "error": "Execution failed",
     "noResults": "No query results",
     "copySql": "Copy SQL",
-    "insertToEditor": "Insert to Editor"
+    "insertToEditor": "Insert to Editor",
+    "mongoJsonFormat": "MongoDB requires JSON format queries. find: {\"collection\": \"users\", \"operation\": \"find\", \"filter\": {}, \"limit\": 100} | insertMany: {\"collection\": \"users\", \"operation\": \"insertMany\", \"documents\": [{\"name\": \"Alice\"}]}",
+        "mongoPlaceholder": "{\n  \"collection\": \"users\",\n  \"operation\": \"find\",\n  \"filter\": {},\n  \"limit\": 100\n}"
   },
   "table": {
     "data": "Data",
@@ -241,7 +248,28 @@
     "apiKey": "API Key",
     "baseUrl": "Base URL",
     "model": "Model",
-    "clearChat": "Clear Chat"
+    "clearChat": "Clear Chat",
+    "notConfigured": "AI assistant is not configured. Please set your API Key in settings.",
+    "goToSettings": "Open Settings",
+    "provider": "Provider",
+    "enableAi": "Enable AI Assistant",
+    "testConnection": "Test Connection",
+    "testing": "Testing...",
+    "testSuccess": "Connected",
+    "testFailed": "Connection failed",
+    "schemaContext": "Table Context",
+    "selectConnection": "Select Connection",
+    "selectDatabase": "Select Database",
+    "selectTable": "Select Table",
+    "loadingSchema": "Loading schema...",
+    "schemaLoaded": "Schema loaded",
+    "schemaMetaOnly": "Table info attached (no schema)",
+    "noConnections": "No connections available",
+    "refHint": "Click the quote button to select a table and attach its schema",
+    "refTable": "Quote Table",
+    "selectTableContext": "Select Table",
+    "schemaLoadFailed": "Failed to load schema",
+    "modelPlaceholder": "Select or type model name"
   },
   "settings": {
     "title": "Settings",

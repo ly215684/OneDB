@@ -7,6 +7,7 @@ export function useShortcuts() {
   const addTab = useTabStore((s) => s.addTab);
   const removeTab = useTabStore((s) => s.removeTab);
   const activeTabId = useTabStore((s) => s.activeTabId);
+  const getActiveTab = useTabStore((s) => s.getActiveTab);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -19,6 +20,8 @@ export function useShortcuts() {
         addTab({
           type: 'sql-editor',
           title: t('toolbar.newQuery'),
+          connectionId: getActiveTab()?.connectionId,
+          database: getActiveTab()?.database,
           data: { sql: '' },
         });
       }

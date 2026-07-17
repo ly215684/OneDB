@@ -33,10 +33,15 @@ export function Workspace() {
     setTabContextMenu({ x: e.clientX, y: e.clientY, tabId });
   };
 
+  const getActiveTab = useTabStore((s) => s.getActiveTab);
+
   const handleNewQuery = () => {
+    const activeTab = getActiveTab();
     addTab({
       type: 'sql-editor',
       title: t('toolbar.newQuery'),
+      connectionId: activeTab?.connectionId,
+      database: activeTab?.database,
       data: { sql: '' },
     });
   };

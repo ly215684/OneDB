@@ -841,7 +841,13 @@ async fn exec_query_mongodb(
     let start = std::time::Instant::now();
 
     // Parse query as JSON command object
-    let parsed: serde_json::Value = serde_json::from_str(query).map_err(|e| e.to_string())?;
+    let trimmed = query.trim();
+    let parsed: serde_json::Value = serde_json::from_str(trimmed).map_err(|e| {
+        format!(
+            "Invalid JSON query: {}. Expected format: {{\"collection\": \"name\", \"operation\": \"find|insertOne|insertMany|updateMany|deleteMany|count|aggregate\", ...}}",
+            e
+        )
+    })?;
     let collection_name = parsed["collection"].as_str().unwrap_or("test");
     let collection = client
         .database(db_name)

@@ -57,10 +57,16 @@ export function Toolbar({ onToggleSidebar, sidebarCollapsed }: ToolbarProps) {
     return () => document.removeEventListener('keydown', handler);
   }, []);
 
+  const getActiveTab = useTabStore((s) => s.getActiveTab);
+
   const handleNewQuery = () => {
+    // Inherit connection context from active tab
+    const activeTab = getActiveTab();
     addTab({
       type: 'sql-editor',
       title: t('toolbar.newQuery'),
+      connectionId: activeTab?.connectionId,
+      database: activeTab?.database,
       data: { sql: '' },
     });
   };

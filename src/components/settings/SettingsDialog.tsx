@@ -1,13 +1,17 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useThemeStore } from '../../stores/themeStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { Modal } from '../ui/Modal';
 import { Input } from '../ui/Input';
+import { Select } from '../ui/Select';
 import { Button } from '../ui/Button';
-import { Sun, Moon, Monitor, Globe, Type, Keyboard, Bot, Shield, Eye, EyeOff, Lock, Unlock, Clock, Info, Download, RefreshCw, CheckCircle } from 'lucide-react';
+import { Sun, Moon, Monitor, Globe, Type, Keyboard, Bot, Shield, Eye, EyeOff, Lock, Unlock, Clock, Info, Download, RefreshCw, CheckCircle, Loader2, ChevronDown } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useUpdateChecker } from '../../hooks/useUpdateChecker';
+import { AI_PROVIDERS } from '../../types/settings';
+import { testApiKey } from '../../services/aiService';
+import { useMessage } from '../ui/Message';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -179,37 +183,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           )}
 
           {activeTab === 'ai' && (
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold">{t('settings.aiSettings')}</h3>
-              <div className="space-y-3">
-                <Input
-                  label={t('ai.apiKey')}
-                  type="password"
-                  value={settings.ai.apiKey}
-                  onChange={(e) => settings.updateAI({ apiKey: e.target.value })}
-                  placeholder="sk-..."
-                />
-                <Input
-                  label={t('ai.baseUrl')}
-                  value={settings.ai.baseUrl}
-                  onChange={(e) => settings.updateAI({ baseUrl: e.target.value })}
-                />
-                <Input
-                  label={t('ai.model')}
-                  value={settings.ai.model}
-                  onChange={(e) => settings.updateAI({ model: e.target.value })}
-                />
-                <label className="flex items-center gap-2 text-xs cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={settings.ai.enabled}
-                    onChange={(e) => settings.updateAI({ enabled: e.target.checked })}
-                    className="rounded border-border"
-                  />
-                  Enable AI Assistant
-                </label>
-              </div>
-            </div>
+            <AISettingsPanel />
           )}
 
           {activeTab === 'security' && (
@@ -549,6 +523,187 @@ function AboutPanel() {
             </button>
           </div>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ModelComboInput({ provider, value, onChange }: { provider: string; value: string; onChange: (v: string) => void }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [inputValue, setInputValue] = useState(value);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const models = AI_PROVIDERS.find((p) => p.id === provider)?.models || [];
+  const filtered = inputValue
+    ? models.filter((m) => m.id.toLowerCase().includes(inputValue.toLowerCase()) || m.name.toLowerCase().includes(inputValue.toLowerCase()))
+    : models;
+
+  // Sync external value
+  useEffect(() => { setInputValue(value); }, [value]);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs text-muted-foreground font-medium">{t('ai.model')}</label>
+      <div className="relative" ref={containerRef}>
+        <input
+          className={clsx(
+            'h-8 w-full pl-3 pr-8 text-sm rounded-md border border-border bg-background',
+            'text-foreground placeholder:text-muted-foreground',
+            'focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent',
+            'transition-colors cursor-pointer'
+          )}
+          value={inputValue}
+          onChange={(e) => {
+            setInputValue(e.target.value);
+            onChange(e.target.value);
+            if (!open) setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          placeholder={provider === 'custom' ? 'gpt-4o / glm-4 / deepseek-chat' : t('ai.modelPlaceholder')}
+        />
+        <ChevronDown
+          size={14}
+          className={clsx(
+            'absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none transition-transform',
+            open && 'rotate-180'
+          )}
+        />
+        {open && (
+          <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-popover border border-border rounded-md shadow-lg max-h-48 overflow-auto">
+            {filtered.length === 0 && (
+              <div className="px-3 py-2 text-xs text-muted-foreground text-center">{t('common.noData')}</div>
+            )}
+            {filtered.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className={clsx(
+                  'flex items-center justify-between w-full px-3 py-1.5 text-xs text-left hover:bg-muted transition-colors',
+                  inputValue === m.id && 'bg-primary/10 text-primary font-medium'
+                )}
+                onClick={() => {
+                  setInputValue(m.id);
+                  onChange(m.id);
+                  setOpen(false);
+                }}
+              >
+                <span>{m.name}</span>
+                <span className="text-muted-foreground text-2xs ml-2">{m.id}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AISettingsPanel() {
+  const { t } = useTranslation();
+  const settings = useSettingsStore();
+  const msg = useMessage();
+  const [testing, setTesting] = useState(false);
+
+  const handleTest = async () => {
+    setTesting(true);
+    const result = await testApiKey(settings.ai);
+    setTesting(false);
+    if (result.success) {
+      msg.success(t('ai.testSuccess'));
+    } else {
+      msg.error(result.message || t('ai.testFailed'));
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-sm font-semibold">{t('settings.aiSettings')}</h3>
+      <div className="space-y-3">
+        <label className="flex items-center gap-2 text-xs cursor-pointer mb-3">
+          <input
+            type="checkbox"
+            checked={settings.ai.enabled}
+            onChange={(e) => settings.updateAI({ enabled: e.target.checked })}
+            className="rounded border-border"
+          />
+          {t('ai.enableAi')}
+        </label>
+
+        <Select
+          label={t('ai.provider')}
+          value={settings.ai.provider}
+          onChange={(e) => {
+            const provider = AI_PROVIDERS.find((p) => p.id === e.target.value);
+            if (provider && provider.id !== 'custom') {
+              settings.updateAI({
+                provider: provider.id,
+                baseUrl: provider.baseUrl,
+                model: provider.models[0]?.id || '',
+              });
+            } else {
+              settings.updateAI({ provider: 'custom', baseUrl: '', model: '' });
+            }
+          }}
+          options={AI_PROVIDERS.map((p) => ({ value: p.id, label: p.name }))}
+        />
+
+        <Input
+          label={t('ai.apiKey')}
+          type="password"
+          value={settings.ai.apiKey}
+          onChange={(e) => {
+            settings.updateAI({ apiKey: e.target.value });
+          }}
+          placeholder={settings.ai.provider === 'zhipu' ? 'your-api-key' : 'sk-...'}
+        />
+
+        {settings.ai.provider === 'custom' && (
+          <Input
+            label={t('ai.baseUrl')}
+            value={settings.ai.baseUrl}
+            onChange={(e) => {
+              settings.updateAI({ baseUrl: e.target.value });
+            }}
+            placeholder="https://api.example.com/v1"
+          />
+        )}
+
+        {/* Model: combo input (custom dropdown + free text) */}
+        <ModelComboInput
+          provider={settings.ai.provider}
+          value={settings.ai.model}
+          onChange={(v: string) => {
+            settings.updateAI({ model: v });
+          }}
+        />
+
+        {/* Test connection button */}
+        <div className="flex items-center gap-3 pt-2">
+          <Button
+            onClick={handleTest}
+            disabled={testing || !settings.ai.apiKey}
+            size="sm"
+            className="gap-1.5"
+          >
+            {testing ? (
+              <><Loader2 size={12} className="animate-spin" /> {t('ai.testing')}</>
+            ) : (
+              <>{t('ai.testConnection')}</>
+            )}
+          </Button>
+        </div>
       </div>
     </div>
   );

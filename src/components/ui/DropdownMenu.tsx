@@ -8,6 +8,7 @@ interface DropdownMenuItem {
   disabled?: boolean;
   danger?: boolean;
   separator?: boolean;
+  hidden?: boolean;
 }
 
 interface DropdownMenuProps {
@@ -41,7 +42,7 @@ export function DropdownMenu({ items, trigger, align = 'left', className }: Drop
             align === 'right' ? 'right-0' : 'left-0'
           )}
         >
-          {items.map((item, i) =>
+          {items.filter((item) => !item.hidden).map((item, i) =>
             item.separator ? (
               <div key={i} className="my-1 border-t border-border" />
             ) : (
@@ -109,7 +110,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       className="fixed z-[100] min-w-40 py-1 bg-popover border border-border rounded-md shadow-lg animate-fade-in"
       style={{ left: adjustedX, top: adjustedY }}
     >
-      {items.map((item, i) =>
+      {items.filter((item) => !item.hidden).map((item, i) =>
         item.separator ? (
           <div key={i} className="my-1 border-t border-border" />
         ) : (

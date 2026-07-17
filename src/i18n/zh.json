@@ -144,6 +144,11 @@
   "editor": {
     "execute": "执行",
     "executeSelected": "执行选中",
+        "selectDatabase": "选择数据库",
+    "loadingDatabases": "加载中...",
+    "noDatabases": "无可用数据库",
+    "selectConnection": "选择连接",
+    "noConnections": "无可用连接",
     "executeAll": "执行全部",
     "format": "格式化",
     "clear": "清空",
@@ -160,7 +165,9 @@
     "error": "执行失败",
     "noResults": "无查询结果",
     "copySql": "复制 SQL",
-    "insertToEditor": "插入编辑器"
+    "insertToEditor": "插入编辑器",
+    "mongoJsonFormat": "MongoDB 需要 JSON 格式查询。find: {\"collection\": \"users\", \"operation\": \"find\", \"filter\": {}, \"limit\": 100} | insertMany: {\"collection\": \"users\", \"operation\": \"insertMany\", \"documents\": [{\"name\": \"Alice\"}]}",
+        "mongoPlaceholder": "{\n  \"collection\": \"users\",\n  \"operation\": \"find\",\n  \"filter\": {},\n  \"limit\": 100\n}"
   },
   "table": {
     "data": "数据",
@@ -241,7 +248,28 @@
     "apiKey": "API Key",
     "baseUrl": "Base URL",
     "model": "模型",
-    "clearChat": "清空对话"
+    "clearChat": "清空对话",
+    "notConfigured": "AI 助手未配置，请先在设置中填写 API Key",
+    "goToSettings": "打开设置",
+    "provider": "服务商",
+    "enableAi": "启用 AI 助手",
+    "testConnection": "测试连接",
+    "testing": "测试中...",
+    "testSuccess": "连接成功",
+    "testFailed": "连接失败",
+    "schemaContext": "表结构上下文",
+    "selectConnection": "选择连接",
+    "selectDatabase": "选择数据库",
+    "selectTable": "选择数据表",
+    "loadingSchema": "加载表结构中...",
+    "schemaLoaded": "表结构已加载",
+    "schemaMetaOnly": "已引用表信息（无表结构）",
+    "noConnections": "暂无可用连接",
+    "refHint": "点击引用按钮选择数据表，自动附加表结构",
+    "refTable": "引用表",
+    "selectTableContext": "选择数据表",
+    "schemaLoadFailed": "加载表结构失败",
+    "modelPlaceholder": "选择或输入模型名称"
   },
   "settings": {
     "title": "设置",

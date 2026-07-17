@@ -221,6 +221,8 @@ export function Sidebar({ width = 260 }: SidebarProps) {
 
   const isRedis = (type: string) => type === 'redis';
   const isRedisOrSqlite = (type: string) => type === 'redis' || type === 'sqlite';
+  const isMongoDB = (type: string) => type === 'mongodb' || type === 'mongodb_srv';
+  const supportsTableStructure = (type: string) => !isRedis(type) && !isMongoDB(type);
 
   const handleDeleteDatabase = async (connId: string, dbName: string) => {
     const conn = getConnection(connId);
@@ -821,6 +823,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
                   data: {},
                 });
               },
+              hidden: !supportsTableStructure(objectMenu.connType),
             },
             {
               label: t('sidebar.generateSql'),

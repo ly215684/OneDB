@@ -1,13 +1,147 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightActiveLine } from '@codemirror/view';
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightActiveLine, placeholder } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import { sql } from '@codemirror/lang-sql';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { autocompletion } from '@codemirror/autocomplete';
+import { autocompletion, type CompletionContext } from '@codemirror/autocomplete';
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { useThemeStore } from '../../stores/themeStore';
+
+// MongoDB operation templates
+const MONGO_OPERATIONS: Record<string, { template: string; detail: string }> = {
+  find: {
+    detail: 'Query documents',
+    template: [
+      '{',
+      '  "collection": "",',
+      '  "operation": "find",',
+      '  "filter": {},',
+      '  "limit": 100',
+      '}',
+    ].join('\n'),
+  },
+  findOne: {
+    detail: 'Query single document',
+    template: [
+      '{',
+      '  "collection": "",',
+      '  "operation": "findOne",',
+      '  "filter": {}',
+      '}',
+    ].join('\n'),
+  },
+  insertOne: {
+    detail: 'Insert one document',
+    template: [
+      '{',
+      '  "collection": "",',
+      '  "operation": "insertOne",',
+      '  "document": {}',
+      '}',
+    ].join('\n'),
+  },
+  insertMany: {
+    detail: 'Insert multiple documents',
+    template: [
+      '{',
+      '  "collection": "",',
+      '  "operation": "insertMany",',
+      '  "documents": [',
+      '    {}',
+      '  ]',
+      '}',
+    ].join('\n'),
+  },
+  updateOne: {
+    detail: 'Update one document',
+    template: [
+      '{',
+      '  "collection": "",',
+      '  "operation": "updateOne",',
+      '  "filter": {},',
+      '  "update": { "$set": {} }',
+      '}',
+    ].join('\n'),
+  },
+  updateMany: {
+    detail: 'Update multiple documents',
+    template: [
+      '{',
+      '  "collection": "",',
+      '  "operation": "updateMany",',
+      '  "filter": {},',
+      '  "update": { "$set": {} }',
+      '}',
+    ].join('\n'),
+  },
+  deleteOne: {
+    detail: 'Delete one document',
+    template: [
+      '{',
+      '  "collection": "",',
+      '  "operation": "deleteOne",',
+      '  "filter": {}',
+      '}',
+    ].join('\n'),
+  },
+  deleteMany: {
+    detail: 'Delete multiple documents',
+    template: [
+      '{',
+      '  "collection": "",',
+      '  "operation": "deleteMany",',
+      '  "filter": {}',
+      '}',
+    ].join('\n'),
+  },
+  count: {
+    detail: 'Count documents',
+    template: [
+      '{',
+      '  "collection": "",',
+      '  "operation": "count",',
+      '  "filter": {}',
+      '}',
+    ].join('\n'),
+  },
+  aggregate: {
+    detail: 'Aggregation pipeline',
+    template: [
+      '{',
+      '  "collection": "",',
+      '  "operation": "aggregate",',
+      '  "pipeline": [',
+      '    { "$match": {} }',
+      '  ]',
+      '}',
+    ].join('\n'),
+  },
+};
+
+function mongoCompletionSource(context: CompletionContext) {
+  const word = context.matchBefore(/\w*/);
+  if (!word || (word.from === word.to && !context.explicit)) return null;
+
+  const typed = word.text.toLowerCase();
+  const ops = Object.entries(MONGO_OPERATIONS).filter(
+    ([name]) => name.startsWith(typed) && typed.length > 0
+  );
+  if (ops.length === 0) return null;
+
+  return {
+    from: word.from,
+    to: word.to,
+    options: ops.map(([name, { template, detail }]) => ({
+      label: name,
+      type: 'function',
+      detail,
+      info: template,
+      apply: template,
+    })),
+  };
+}
 
 interface CodeMirrorEditorProps {
   value: string;
@@ -15,9 +149,11 @@ interface CodeMirrorEditorProps {
   onExecute?: (sql: string, selectedOnly: boolean) => void;
   readOnly?: boolean;
   tables?: { name: string; columns: { name: string; type: string }[] }[];
+  placeholder?: string;
+  isMongo?: boolean;
 }
 
-export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false, tables }: CodeMirrorEditorProps) {
+export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false, tables, placeholder: placeholderText, isMongo = false }: CodeMirrorEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeResolved = useThemeStore((s) => s.resolved);
@@ -35,7 +171,9 @@ export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false,
       highlightActiveLineGutter(),
       highlightSelectionMatches(),
       lineNumbers(),
-      autocompletion(),
+      autocompletion({
+        override: isMongo ? [mongoCompletionSource] : undefined,
+      }),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       keymap.of([
         ...defaultKeymap,
@@ -77,6 +215,10 @@ export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false,
         '.cm-gutters': {
           borderRight: '1px solid var(--border)',
         },
+        '.cm-placeholder': {
+          color: '#999',
+          fontStyle: 'normal',
+        },
       }),
     ];
 
@@ -84,12 +226,16 @@ export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false,
       extensions.push(EditorState.readOnly.of(true));
     }
 
+    if (placeholderText) {
+      extensions.push(placeholder(placeholderText));
+    }
+
     if (themeResolved === 'dark') {
       extensions.push(oneDark);
     }
 
     return extensions;
-  }, [onChange, onExecute, readOnly, tables, themeResolved]);
+  }, [onChange, onExecute, readOnly, tables, themeResolved, placeholderText, isMongo]);
 
   useEffect(() => {
     if (!editorRef.current) return;
