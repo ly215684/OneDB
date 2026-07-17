@@ -86,7 +86,7 @@ jobs:
             ### Downloads
             | Platform | File |
             |----------|------|
-            | Windows  | `.exe` (NSIS installer) or `.msi` |
+            | Windows  | `.exe` (NSIS installer), `.msi`, or `onedb-portable-*-windows-x64.exe` (免安装版) |
             | macOS    | `.dmg` (Apple Silicon & Intel) |
             | Linux    | `.deb` or `.AppImage` |
 
@@ -94,3 +94,16 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+      # ── Windows portable build ──
+      - name: Create portable executable (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Copy-Item "src-tauri\target\release\onedb.exe" "onedb-portable-${{ github.ref_name }}-windows-x64.exe"
+
+      # ── Upload portable to release ──
+      - name: Upload portable release asset
+        if: runner.os == 'Windows'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: onedb-portable-${{ github.ref_name }}-windows-x64.exe
