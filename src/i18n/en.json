@@ -143,6 +143,7 @@
     "rows": "rows",
     "affected": "affected",
     "duration": "duration",
+    "ms": "ms",
     "success": "Execution successful",
     "error": "Execution failed",
     "noResults": "No query results",

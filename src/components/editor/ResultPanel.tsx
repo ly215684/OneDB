@@ -51,7 +51,7 @@ export function ResultPanel({ result, isExecuting }: ResultPanelProps) {
         {result.affectedRows !== undefined && (
           <Badge variant="warning">{result.affectedRows} {t('editor.affected')}</Badge>
         )}
-        <Badge variant="default">{result.duration}ms {t('editor.duration')}</Badge>
+        <Badge variant="default">{result.duration} {t('editor.ms')} {t('editor.duration')}</Badge>
       </div>
 
       {/* Tabs */}

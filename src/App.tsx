@@ -10,6 +10,13 @@ function App() {
     applyTheme();
   }, [applyTheme]);
 
+  // Disable browser default context menu globally
+  useEffect(() => {
+    const handler = (e: MouseEvent) => e.preventDefault();
+    document.addEventListener('contextmenu', handler);
+    return () => document.removeEventListener('contextmenu', handler);
+  }, []);
+
   return (
     <DialogProvider>
       <MainLayout />

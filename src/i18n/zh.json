@@ -143,6 +143,7 @@
     "rows": "行",
     "affected": "影响行数",
     "duration": "耗时",
+    "ms": "毫秒",
     "success": "执行成功",
     "error": "执行失败",
     "noResults": "无查询结果",

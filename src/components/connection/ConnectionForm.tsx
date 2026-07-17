@@ -6,7 +6,7 @@ import { parseConnectionUrl, validateConnectionConfig, testConnection } from '..
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Tabs } from '../ui/Tabs';
-import { ArrowLeft, Link, FileText, AlertCircle, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Link, FileText, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface ConnectionFormProps {
@@ -280,7 +280,14 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
             'flex items-center gap-2 p-2 rounded text-xs',
             testResult.success ? 'bg-green-500/10 text-green-600' : 'bg-destructive/10 text-destructive'
           )}>
-            <CheckCircle size={14} className="flex-shrink-0" />
+            {testResult.success ? (
+              <CheckCircle size={14} className="flex-shrink-0" />
+            ) : (
+              <XCircle size={14} className="flex-shrink-0" />
+            )}
+            <span className="font-medium">
+              {testResult.success ? t('connection.testSuccess') : t('connection.testFailed')}：
+            </span>
             {testResult.message}
           </div>
         )}

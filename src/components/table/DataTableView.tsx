@@ -192,7 +192,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
           trigger={<Button variant="ghost" size="icon" className="h-7 w-7"><ArrowDownToLine size={14} /></Button>}
         />
         <span className="text-2xs text-muted-foreground">
-          {filteredRows.length} {t('table.rows')} · {duration}ms
+          {filteredRows.length} {t('table.rows')} · {duration} {t('editor.ms')}
         </span>
       </div>
 
@@ -209,7 +209,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
         ) : (
           <table className="w-full text-xs border-collapse">
             <thead className="sticky top-0 z-10">
-              <tr className="bg-muted/50">
+              <tr className="bg-muted">
                 <th className="w-8 px-2 py-1.5 border-b border-r border-border text-center">
                   <input
                     type="checkbox"
