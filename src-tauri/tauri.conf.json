@@ -39,7 +39,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/anthropic/OneDB/releases/latest/download/latest.json"
+        "https://github.com/ly215684/OneDB/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"
