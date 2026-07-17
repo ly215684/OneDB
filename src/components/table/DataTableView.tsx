@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { executeQuery } from '../../services/connectionService';
 import { exportToFile } from '../../services/exportService';
+import { useDragScroll } from '../../hooks/useDragScroll';
 import { Button } from '../ui/Button';
 import { DropdownMenu } from '../ui/DropdownMenu';
 import {
@@ -36,6 +37,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   const getConnection = useConnectionStore((s) => s.getConnection);
   const conn = connectionId ? getConnection(connectionId) : undefined;
   const isNoSql = conn?.type === 'mongodb' || conn?.type === 'mongodb_srv' || conn?.type === 'redis';
+  const dragScrollRef = useDragScroll();
 
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<RowData[]>([]);
@@ -197,7 +199,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-auto min-h-0">
+      <div ref={dragScrollRef} className="flex-1 overflow-auto min-h-0 cursor-grab">
         {loading ? (
           <div className="flex items-center justify-center h-full">
             <RefreshCw size={24} className="animate-spin text-muted-foreground" />
@@ -207,7 +209,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
             {t('table.noData')}
           </div>
         ) : (
-          <table className="w-full text-xs border-collapse">
+          <table className="min-w-full text-xs border-collapse">
             <thead className="sticky top-0 z-10">
               <tr className="bg-muted">
                 <th className="w-8 px-2 py-1.5 border-b border-r border-border text-center">

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { QueryResult } from '../../types/connection';
+import { useDragScroll } from '../../hooks/useDragScroll';
 import { Tabs } from '../ui/Tabs';
 import { ScrollArea } from '../ui/ScrollArea';
 import { Badge } from '../ui/Badge';
@@ -15,6 +16,7 @@ interface ResultPanelProps {
 export function ResultPanel({ result, isExecuting }: ResultPanelProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('results');
+  const dragScrollRef = useDragScroll();
 
   if (isExecuting) {
     return (
@@ -66,7 +68,7 @@ export function ResultPanel({ result, isExecuting }: ResultPanelProps) {
       />
 
       {/* Tab Content */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div ref={dragScrollRef} className="flex-1 min-h-0 overflow-auto cursor-grab">
         {activeTab === 'results' && <ResultTable result={result} />}
         {activeTab === 'messages' && (
           <div className="p-3">
@@ -88,7 +90,7 @@ export function ResultPanel({ result, isExecuting }: ResultPanelProps) {
 function ResultTable({ result }: { result: QueryResult }) {
   return (
     <ScrollArea className="h-full">
-      <table className="w-full text-xs border-collapse">
+      <table className="min-w-full text-xs border-collapse">
         <thead className="sticky top-0 bg-toolbar z-10">
           <tr>
             <th className="px-2 py-1.5 text-left font-medium text-muted-foreground border-b border-r border-border w-12 text-center">
