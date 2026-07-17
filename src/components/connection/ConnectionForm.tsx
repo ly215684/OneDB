@@ -246,7 +246,7 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
         />
 
         {/* Color Mark */}
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-2">
           <label className="text-xs text-muted-foreground font-medium">{t('connection.colorMark')}</label>
           <div className="flex gap-2">
             {COLOR_OPTIONS.map((opt) => (
@@ -258,7 +258,7 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
                   color === opt.value ? 'ring-2 ring-offset-2 ring-offset-background ring-ring scale-110' : 'hover:scale-110'
                 )}
                 style={{ backgroundColor: opt.value }}
-                title={opt.name}
+                title={t(opt.name)}
               />
             ))}
           </div>

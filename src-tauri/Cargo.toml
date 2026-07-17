@@ -1,6 +1,6 @@
 [package]
 name = "onedb"
-version = "0.1.0"
+version = "0.1.2"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -31,4 +31,6 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 mongodb = "2"
 redis = { version = "0.25", features = ["tokio-comp"] }
 futures = "0.3"
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-process = "2.3.1"
 

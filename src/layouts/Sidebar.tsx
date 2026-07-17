@@ -8,6 +8,7 @@ import { exportData, downloadFile, type ExportFormat } from '../services/exportS
 import { importFromFile, type ImportFormat } from '../services/importService';
 import { ConnectionDialog } from '../components/connection/ConnectionDialog';
 import { useDialog } from '../components/ui/Dialog';
+import { useMessage } from '../components/ui/Message';
 import {
   Plus,
   Search,
@@ -35,6 +36,7 @@ import {
   Columns,
   Layers,
   Eraser,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { ScrollArea } from '../components/ui/ScrollArea';
@@ -47,6 +49,7 @@ interface SidebarProps {
 export function Sidebar({ width = 260 }: SidebarProps) {
   const { t } = useTranslation();
   const dialog = useDialog();
+  const message = useMessage();
   const connections = useConnectionStore((s) => s.connections);
   const setConnectionStatus = useConnectionStore((s) => s.setConnectionStatus);
   const setDatabases = useConnectionStore((s) => s.setDatabases);
@@ -63,6 +66,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
   const [dbMenu, setDbMenu] = useState<{ x: number; y: number; connId: string; dbName: string; connType: string } | null>(null);
   const [connDialogOpen, setConnDialogOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<import('../types/connection').Connection | null>(null);
+  const [loadingTable, setLoadingTable] = useState<{ connId: string; dbName: string; tableName: string } | null>(null);
 
   const toggleConnection = (id: string) => {
     setExpandedConnections((prev) => {
@@ -106,7 +110,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       } catch (error) {
         setConnectionStatus(connId, false);
         console.error('Failed to connect:', error);
-        dialog.alert(`Connection failed: ${error}`, { title: t('connection.testFailed'), variant: 'error' });
+        message.error(`${t('connection.testFailed')}: ${error}`);
       }
     }
   };
@@ -139,7 +143,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
     } catch (error) {
       setConnectionStatus(connId, false);
       console.error('Failed to connect:', error);
-      dialog.alert(`Connection failed: ${error}`, { title: t('connection.testFailed'), variant: 'error' });
+      message.error(`${t('connection.testFailed')}: ${error}`);
     }
   };
 
@@ -201,14 +205,15 @@ export function Sidebar({ width = 260 }: SidebarProps) {
 
       const result = await executeQuery(conn.type, conn.config, query, targetDb);
       if (result.error) {
-        dialog.alert(`${t('connection.createDbFailed')}: ${result.error}`, { title: t('connection.createDbFailed'), variant: 'error' });
+        message.error(`${t('connection.createDbFailed')}: ${result.error}`);
         return;
       }
       // Refresh database list
       const dbs = await listDatabases(conn.type, conn.config);
       setDatabases(connId, dbs);
+      message.success(t('connection.createDbSuccess', { name: safeName }));
     } catch (error) {
-      dialog.alert(`${t('connection.createDbFailed')}: ${error}`, { title: t('connection.createDbFailed'), variant: 'error' });
+      message.error(`${t('connection.createDbFailed')}: ${error}`);
     }
   };
 
@@ -234,13 +239,14 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       const targetDb = isMongo ? dbName : undefined;
       const result = await executeQuery(conn.type, conn.config, query, targetDb);
       if (result.error) {
-        dialog.alert(`${t('sidebar.deleteDbFailed')}: ${result.error}`, { title: t('sidebar.deleteDbFailed'), variant: 'error' });
+        message.error(`${t('sidebar.deleteDbFailed')}: ${result.error}`);
         return;
       }
       const dbs = await listDatabases(conn.type, conn.config);
       setDatabases(connId, dbs);
+      message.success(t('sidebar.deleteDbSuccess', { name: dbName }));
     } catch (error) {
-      dialog.alert(`${t('sidebar.deleteDbFailed')}: ${error}`, { title: t('sidebar.deleteDbFailed'), variant: 'error' });
+      message.error(`${t('sidebar.deleteDbFailed')}: ${error}`);
     }
   };
 
@@ -266,7 +272,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       }
       const result = await executeQuery(conn.type, conn.config, query, dbName);
       if (result.error) {
-        dialog.alert(`${t('sidebar.createTableFailed')}: ${result.error}`, { title: t('sidebar.createTableFailed'), variant: 'error' });
+        message.error(`${t('sidebar.createTableFailed')}: ${result.error}`);
         return;
       }
       const dbs = await listDatabases(conn.type, conn.config);
@@ -281,7 +287,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
         data: {},
       });
     } catch (error) {
-      dialog.alert(`${t('sidebar.createTableFailed')}: ${error}`, { title: t('sidebar.createTableFailed'), variant: 'error' });
+      message.error(`${t('sidebar.createTableFailed')}: ${error}`);
     }
   };
 
@@ -295,9 +301,12 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       dialog.alert(t('sidebar.noTablesToExport'), { title: t('sidebar.exportData'), variant: 'info' });
       return;
     }
-    const formatMap: Record<string, ExportFormat> = { '1': 'sql-insert', '2': 'json', '3': 'csv' };
-    const choice = await dialog.prompt(t('sidebar.selectExportFormat'), { title: t('sidebar.exportData'), placeholder: '1', defaultValue: '1' }) || '1';
-    const format = formatMap[choice] || 'sql-insert';
+    const exportOptions = [
+      { value: 'sql-insert', label: 'SQL' },
+      { value: 'json', label: 'JSON' },
+      { value: 'csv', label: 'CSV' },
+    ];
+    const format = (await dialog.select(t('sidebar.selectExportFormat'), { title: t('sidebar.exportData'), options: exportOptions, defaultValue: 'sql-insert' })) as ExportFormat || 'sql-insert';
     try {
       const isMongo = conn.type === 'mongodb' || conn.type === 'mongodb_srv';
       for (const table of tables) {
@@ -312,9 +321,9 @@ export function Sidebar({ width = 260 }: SidebarProps) {
           downloadFile(content, `${table}.${ext}`, mime);
         }
       }
-      dialog.alert(t('sidebar.exportSuccess'), { title: t('sidebar.exportData'), variant: 'success' });
+      message.success(t('sidebar.exportSuccess'));
     } catch (error) {
-      dialog.alert(`${t('sidebar.exportFailed')}: ${error}`, { title: t('sidebar.exportFailed'), variant: 'error' });
+      message.error(`${t('sidebar.exportFailed')}: ${error}`);
     }
   };
 
@@ -333,7 +342,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
         const format: ImportFormat = ext === 'json' ? 'json' : ext === 'csv' ? 'csv' : 'sql';
         const parsed = importFromFile(text, format);
         if (parsed.errors.length > 0 && parsed.rowCount === 0) {
-          dialog.alert(`${t('sidebar.importFailed')}: ${parsed.errors[0]}`, { title: t('sidebar.importFailed'), variant: 'error' });
+          message.error(`${t('sidebar.importFailed')}: ${parsed.errors[0]}`);
           return;
         }
         const tableName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_');
@@ -363,9 +372,9 @@ export function Sidebar({ width = 260 }: SidebarProps) {
         }
         const dbs = await listDatabases(conn.type, conn.config);
         setDatabases(connId, dbs);
-        dialog.alert(t('sidebar.importSuccess', { count: parsed.rowCount }), { title: t('sidebar.importData'), variant: 'success' });
+        message.success(t('sidebar.importSuccess', { count: parsed.rowCount }));
       } catch (error) {
-        dialog.alert(`${t('sidebar.importFailed')}: ${error}`, { title: t('sidebar.importFailed'), variant: 'error' });
+        message.error(`${t('sidebar.importFailed')}: ${error}`);
       }
     };
     input.click();
@@ -390,13 +399,14 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       }
       const result = await executeQuery(conn.type, conn.config, query, dbName);
       if (result.error) {
-        dialog.alert(`${t('sidebar.deleteTableFailed')}: ${result.error}`, { title: t('sidebar.deleteTableFailed'), variant: 'error' });
+        message.error(`${t('sidebar.deleteTableFailed')}: ${result.error}`);
         return;
       }
       const dbs = await listDatabases(conn.type, conn.config);
       setDatabases(connId, dbs);
+      message.success(t('sidebar.deleteTableSuccess', { name: tableName }));
     } catch (error) {
-      dialog.alert(`${t('sidebar.deleteTableFailed')}: ${error}`, { title: t('sidebar.deleteTableFailed'), variant: 'error' });
+      message.error(`${t('sidebar.deleteTableFailed')}: ${error}`);
     }
   };
 
@@ -405,6 +415,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
     if (!conn || !conn.isConnected) return;
     const ok = await dialog.confirm(t('sidebar.confirmTruncateTable', { name: tableName }), { title: t('sidebar.truncateTable'), variant: 'warning' });
     if (!ok) return;
+    setLoadingTable({ connId, dbName, tableName });
     try {
       const isMongo = conn.type === 'mongodb' || conn.type === 'mongodb_srv';
       let query: string;
@@ -417,21 +428,26 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       }
       const result = await executeQuery(conn.type, conn.config, query, dbName);
       if (result.error) {
-        dialog.alert(`${t('sidebar.truncateTableFailed')}: ${result.error}`, { title: t('sidebar.truncateTableFailed'), variant: 'error' });
+        message.error(`${t('sidebar.truncateTableFailed')}: ${result.error}`);
         return;
       }
-      dialog.alert(t('sidebar.truncateTableSuccess', { name: tableName }), { title: t('sidebar.truncateTable'), variant: 'success' });
+      message.success(t('sidebar.truncateTableSuccess', { name: tableName }));
     } catch (error) {
-      dialog.alert(`${t('sidebar.truncateTableFailed')}: ${error}`, { title: t('sidebar.truncateTableFailed'), variant: 'error' });
+      message.error(`${t('sidebar.truncateTableFailed')}: ${error}`);
+    } finally {
+      setLoadingTable(null);
     }
   };
 
   const handleExportTable = async (connId: string, dbName: string, tableName: string) => {
     const conn = getConnection(connId);
     if (!conn || !conn.isConnected) return;
-    const formatMap: Record<string, ExportFormat> = { '1': 'sql-insert', '2': 'json', '3': 'csv' };
-    const choice = await dialog.prompt(t('sidebar.selectExportFormat'), { title: t('sidebar.exportData'), placeholder: '1', defaultValue: '1' }) || '1';
-    const format = formatMap[choice] || 'sql-insert';
+    const exportOptions = [
+      { value: 'sql-insert', label: 'SQL' },
+      { value: 'json', label: 'JSON' },
+      { value: 'csv', label: 'CSV' },
+    ];
+    const format = (await dialog.select(t('sidebar.selectExportFormat'), { title: t('sidebar.exportData'), options: exportOptions, defaultValue: 'sql-insert' })) as ExportFormat || 'sql-insert';
     try {
       const isMongo = conn.type === 'mongodb' || conn.type === 'mongodb_srv';
       const query = isMongo
@@ -443,9 +459,9 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       const ext = format === 'json' ? 'json' : format === 'csv' ? 'csv' : 'sql';
       const mime = format === 'json' ? 'application/json' : format === 'csv' ? 'text/csv' : 'text/plain';
       downloadFile(content, `${tableName}_${Date.now()}.${ext}`, mime);
-      dialog.alert(t('sidebar.exportSuccess'), { title: t('sidebar.exportData'), variant: 'success' });
+      message.success(t('sidebar.exportSuccess'));
     } catch (error) {
-      dialog.alert(`${t('sidebar.exportFailed')}: ${error}`, { title: t('sidebar.exportFailed'), variant: 'error' });
+      message.error(`${t('sidebar.exportFailed')}: ${error}`);
     }
   };
 
@@ -464,7 +480,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
         const format: ImportFormat = ext === 'json' ? 'json' : ext === 'csv' ? 'csv' : 'sql';
         const parsed = importFromFile(text, format);
         if (parsed.errors.length > 0 && parsed.rowCount === 0) {
-          dialog.alert(`${t('sidebar.importFailed')}: ${parsed.errors[0]}`, { title: t('sidebar.importFailed'), variant: 'error' });
+          message.error(`${t('sidebar.importFailed')}: ${parsed.errors[0]}`);
           return;
         }
         const isMongo = conn.type === 'mongodb' || conn.type === 'mongodb_srv';
@@ -491,9 +507,9 @@ export function Sidebar({ width = 260 }: SidebarProps) {
             if (result.error) throw new Error(result.error);
           }
         }
-        dialog.alert(t('sidebar.importSuccess', { count: parsed.rowCount }), { title: t('sidebar.importData'), variant: 'success' });
+        message.success(t('sidebar.importSuccess', { count: parsed.rowCount }));
       } catch (error) {
-        dialog.alert(`${t('sidebar.importFailed')}: ${error}`, { title: t('sidebar.importFailed'), variant: 'error' });
+        message.error(`${t('sidebar.importFailed')}: ${error}`);
       }
     };
     input.click();
@@ -662,6 +678,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
                                         key={table.name}
                                         icon={<Columns size={12} />}
                                         label={table.name}
+                                        loading={loadingTable?.connId === conn.id && loadingTable?.dbName === db.name && loadingTable?.tableName === table.name}
                                         onDoubleClick={() => handleTableDoubleClick(table.name, conn.id, db.name)}
                                         onContextMenu={(e) => {
                                           e.preventDefault();
@@ -901,12 +918,14 @@ function TreeItem({
   icon,
   label,
   badge,
+  loading,
   onDoubleClick,
   onContextMenu,
 }: {
   icon: React.ReactNode;
   label: string;
   badge?: string;
+  loading?: boolean;
   onDoubleClick?: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
@@ -918,6 +937,7 @@ function TreeItem({
     >
       <span className="text-muted-foreground flex-shrink-0">{icon}</span>
       <span className="truncate flex-1 min-w-0">{label}</span>
+      {loading && <Loader2 size={12} className="text-primary animate-spin flex-shrink-0" />}
       {badge && (
         <span className="text-2xs text-muted-foreground bg-muted px-1 rounded">{badge}</span>
       )}

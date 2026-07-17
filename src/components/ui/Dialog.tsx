@@ -5,8 +5,13 @@ import { useTranslation } from 'react-i18next';
 
 // ─── Types ──────────────────────────────────────────────────
 
-type DialogType = 'alert' | 'confirm' | 'prompt';
+type DialogType = 'alert' | 'confirm' | 'prompt' | 'select';
 type DialogVariant = 'info' | 'success' | 'warning' | 'error';
+
+interface SelectOption {
+  label: string;
+  value: string;
+}
 
 interface DialogConfig {
   open: boolean;
@@ -16,6 +21,7 @@ interface DialogConfig {
   message?: string;
   placeholder?: string;
   defaultValue?: string;
+  options?: SelectOption[];
   confirmText: string;
   cancelText: string;
 }
@@ -24,6 +30,7 @@ interface DialogContextValue {
   alert: (message: string, options?: { title?: string; variant?: DialogVariant }) => Promise<void>;
   confirm: (message: string, options?: { title?: string; variant?: DialogVariant; confirmText?: string }) => Promise<boolean>;
   prompt: (message: string, options?: { title?: string; placeholder?: string; defaultValue?: string }) => Promise<string | null>;
+  select: (message: string, options: { title?: string; options: SelectOption[]; defaultValue?: string }) => Promise<string | null>;
 }
 
 const DialogContext = createContext<DialogContextValue | null>(null);
@@ -155,11 +162,31 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
     });
   }, [openDialog]);
 
-  // Focus input when prompt opens
+  const select = useCallback((message: string, options: { title?: string; options: SelectOption[]; defaultValue?: string }) => {
+    return new Promise<string | null>((resolve) => {
+      openDialog(
+        {
+          type: 'select',
+          variant: 'info',
+          title: options.title || '',
+          message,
+          options: options.options,
+          defaultValue: options.defaultValue || options.options[0]?.value || '',
+          confirmText: t('dialog.ok'),
+          cancelText: t('dialog.cancel'),
+        },
+        (v) => resolve(v as string | null)
+      );
+    });
+  }, [openDialog]);
+
+  // Focus input when prompt/select opens
   useEffect(() => {
-    if (config.open && config.type === 'prompt' && animating) {
+    if (config.open && (config.type === 'prompt' || config.type === 'select') && animating) {
       setInputValue(config.defaultValue || '');
-      setTimeout(() => inputRef.current?.focus(), 80);
+      if (config.type === 'prompt') {
+        setTimeout(() => inputRef.current?.focus(), 80);
+      }
     }
   }, [config.open, config.type, config.defaultValue, animating]);
 
@@ -193,7 +220,7 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
   const vc = variantConfig[config.variant];
 
   return (
-    <DialogContext.Provider value={{ alert, confirm, prompt }}>
+    <DialogContext.Provider value={{ alert, confirm, prompt, select }}>
       {children}
 
       {visible && (
@@ -241,23 +268,42 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
                 <p className="text-sm text-muted-foreground leading-relaxed ml-[42px]">{config.message}</p>
               )}
 
-              {config.type === 'prompt' && (
+              {(config.type === 'prompt' || config.type === 'select') && (
                 <div className="mt-3 ml-[42px]">
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder={config.placeholder}
-                    className={clsx(
-                      'w-full h-9 px-3 text-sm rounded-lg',
-                      'border border-border bg-background',
-                      'text-foreground placeholder:text-muted-foreground/60',
-                      'focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50',
-                      'transition-all duration-200'
-                    )}
-                  />
+                  {config.type === 'prompt' ? (
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder={config.placeholder}
+                      className={clsx(
+                        'w-full h-9 px-3 text-sm rounded-lg',
+                        'border border-border bg-background',
+                        'text-foreground placeholder:text-muted-foreground/60',
+                        'focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50',
+                        'transition-all duration-200'
+                      )}
+                    />
+                  ) : (
+                    <select
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      className={clsx(
+                        'w-full h-9 px-3 text-sm rounded-lg',
+                        'border border-border bg-background',
+                        'text-foreground',
+                        'focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50',
+                        'transition-all duration-200 cursor-pointer'
+                      )}
+                    >
+                      {config.options?.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useThemeStore } from './stores/themeStore';
 import { MainLayout } from './layouts/MainLayout';
 import { DialogProvider } from './components/ui/Dialog';
+import { MessageProvider } from './components/ui/Message';
 
 function App() {
   const applyTheme = useThemeStore((s) => s.applyTheme);
@@ -19,7 +20,9 @@ function App() {
 
   return (
     <DialogProvider>
-      <MainLayout />
+      <MessageProvider>
+        <MainLayout />
+      </MessageProvider>
     </DialogProvider>
   );
 }

@@ -5,8 +5,9 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { Modal } from '../ui/Modal';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
-import { Sun, Moon, Monitor, Globe, Type, Keyboard, Bot, Shield, Eye, EyeOff, Lock, Unlock, Clock, Info } from 'lucide-react';
+import { Sun, Moon, Monitor, Globe, Type, Keyboard, Bot, Shield, Eye, EyeOff, Lock, Unlock, Clock, Info, Download, RefreshCw, CheckCircle } from 'lucide-react';
 import { clsx } from 'clsx';
+import { useUpdateChecker } from '../../hooks/useUpdateChecker';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -37,6 +38,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             { id: 'shortcuts', label: t('settings.shortcuts'), icon: <Keyboard size={14} /> },
             { id: 'ai', label: t('settings.aiSettings'), icon: <Bot size={14} /> },
             { id: 'security', label: t('settings.security'), icon: <Shield size={14} /> },
+            { id: 'about', label: t('settings.about'), icon: <Info size={14} /> },
           ].map((item) => (
             <button
               key={item.id}
@@ -212,6 +214,10 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
           {activeTab === 'security' && (
             <SecuritySettingsPanel />
+          )}
+
+          {activeTab === 'about' && (
+            <AboutPanel />
           )}
         </div>
       </div>
@@ -400,6 +406,149 @@ function SecuritySettingsPanel() {
             <div className="absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform peer-checked:translate-x-4" />
           </div>
         </label>
+      </div>
+    </div>
+  );
+}
+
+function AboutPanel() {
+  const { t } = useTranslation();
+  const { status, version, body, progress, error, checkForUpdate, downloadAndInstall, restart } = useUpdateChecker();
+
+  const currentVersion = __APP_VERSION__;
+
+  return (
+    <div className="space-y-5">
+      <h3 className="text-sm font-semibold">{t('settings.about')}</h3>
+
+      {/* App Info */}
+      <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/50 border border-border">
+        <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+          <span className="text-primary font-bold text-lg">1</span>
+        </div>
+        <div>
+          <h4 className="text-sm font-semibold text-foreground">OneDB</h4>
+          <p className="text-xs text-muted-foreground">
+            {t('settings.currentVersion')}: v{currentVersion}
+          </p>
+        </div>
+      </div>
+
+      {/* Update Section */}
+      <div className="space-y-3">
+        {status === 'idle' || status === 'up-to-date' ? (
+          <div className="space-y-2">
+            {status === 'up-to-date' && (
+              <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
+                <CheckCircle size={14} />
+                {t('settings.upToDate')}
+              </div>
+            )}
+            <button
+              onClick={checkForUpdate}
+              className={clsx(
+                'flex items-center gap-2 h-8 px-4 text-xs font-medium rounded-lg',
+                'bg-primary text-primary-foreground hover:bg-primary/90',
+                'transition-colors'
+              )}
+            >
+              <RefreshCw size={14} />
+              {t('settings.checkUpdate')}
+            </button>
+          </div>
+        ) : status === 'checking' ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <RefreshCw size={14} className="animate-spin" />
+            {t('settings.checking')}
+          </div>
+        ) : status === 'available' ? (
+          <div className="space-y-3 p-3 rounded-lg border border-primary/30 bg-primary/5">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-medium text-foreground">{t('settings.updateAvailable')}</span>
+                <span className="ml-2 px-1.5 py-0.5 text-2xs font-bold rounded bg-primary/10 text-primary">
+                  v{version}
+                </span>
+              </div>
+            </div>
+            {body && (
+              <div className="text-xs text-muted-foreground leading-relaxed max-h-24 overflow-y-auto whitespace-pre-wrap">
+                {body}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={downloadAndInstall}
+                className={clsx(
+                  'flex items-center gap-2 h-8 px-4 text-xs font-medium rounded-lg',
+                  'bg-primary text-primary-foreground hover:bg-primary/90',
+                  'transition-colors'
+                )}
+              >
+                <Download size={14} />
+                {t('settings.downloadUpdate')}
+              </button>
+              <button
+                onClick={checkForUpdate}
+                className={clsx(
+                  'h-8 px-4 text-xs font-medium rounded-lg',
+                  'border border-border text-muted-foreground hover:bg-muted',
+                  'transition-colors'
+                )}
+              >
+                {t('settings.later')}
+              </button>
+            </div>
+          </div>
+        ) : status === 'downloading' ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Download size={14} className="animate-bounce" />
+              {t('settings.downloading')} {t('settings.downloadProgress', { progress })}
+            </div>
+            <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        ) : status === 'ready' ? (
+          <div className="space-y-2 p-3 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/30">
+            <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle size={14} />
+              {t('settings.updateReady')}
+            </div>
+            <button
+              onClick={restart}
+              className={clsx(
+                'flex items-center gap-2 h-8 px-4 text-xs font-medium rounded-lg',
+                'bg-primary text-primary-foreground hover:bg-primary/90',
+                'transition-colors'
+              )}
+            >
+              <RefreshCw size={14} />
+              {t('settings.restartToUpdate')}
+            </button>
+          </div>
+        ) : status === 'error' ? (
+          <div className="space-y-2">
+            <div className="text-xs text-destructive">
+              {t('settings.updateError')}: {error}
+            </div>
+            <button
+              onClick={checkForUpdate}
+              className={clsx(
+                'flex items-center gap-2 h-8 px-4 text-xs font-medium rounded-lg',
+                'border border-border text-muted-foreground hover:bg-muted',
+                'transition-colors'
+              )}
+            >
+              <RefreshCw size={14} />
+              {t('common.retry')}
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

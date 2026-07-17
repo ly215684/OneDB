@@ -136,14 +136,14 @@ export interface TreeNode {
 }
 
 export const COLOR_OPTIONS = [
-  { name: 'Blue', value: '#3b82f6' },
-  { name: 'Green', value: '#22c55e' },
-  { name: 'Orange', value: '#f59e0b' },
-  { name: 'Red', value: '#ef4444' },
-  { name: 'Purple', value: '#a855f7' },
-  { name: 'Cyan', value: '#06b6d4' },
-  { name: 'Pink', value: '#ec4899' },
-  { name: 'Teal', value: '#14b8a6' },
+  { name: 'connection.colorBlue', value: '#3b82f6' },
+  { name: 'connection.colorGreen', value: '#22c55e' },
+  { name: 'connection.colorOrange', value: '#f59e0b' },
+  { name: 'connection.colorRed', value: '#ef4444' },
+  { name: 'connection.colorPurple', value: '#a855f7' },
+  { name: 'connection.colorCyan', value: '#06b6d4' },
+  { name: 'connection.colorPink', value: '#ec4899' },
+  { name: 'connection.colorTeal', value: '#14b8a6' },
 ] as const;
 
 export const DEFAULT_PORTS: Record<DatabaseType, number> = {
