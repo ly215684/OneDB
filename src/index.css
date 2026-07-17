@@ -1,0 +1,178 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== Light Theme (default) ===== */
+:root {
+  --background: #ffffff;
+  --foreground: #1a1a2e;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #3b82f6;
+
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #334155;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #eff6ff;
+  --accent-foreground: #1d4ed8;
+  --popover: #ffffff;
+  --popover-foreground: #1a1a2e;
+  --card: #ffffff;
+  --card-foreground: #1a1a2e;
+
+  --sidebar: #f8fafc;
+  --sidebar-foreground: #334155;
+  --sidebar-border: #e2e8f0;
+  --sidebar-active: #eff6ff;
+
+  --toolbar: #f8fafc;
+  --toolbar-border: #e2e8f0;
+
+  --editor: #ffffff;
+  --editor-gutter: #f1f5f9;
+  --editor-line: #eff6ff;
+
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --info: #3b82f6;
+
+  --scrollbar-thumb: #cbd5e1;
+  --scrollbar-track: transparent;
+  --selection-bg: #dbeafe;
+  --hover-bg: #f1f5f9;
+  --hover: #f1f5f9;
+  --active-bg: #e2e8f0;
+  --divider: #e2e8f0;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+}
+
+/* ===== Dark Theme ===== */
+.dark {
+  --background: #0f172a;
+  --foreground: #e2e8f0;
+  --border: #1e293b;
+  --input: #1e293b;
+  --ring: #3b82f6;
+
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #1e293b;
+  --secondary-foreground: #cbd5e1;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: #172554;
+  --accent-foreground: #60a5fa;
+  --popover: #1e293b;
+  --popover-foreground: #e2e8f0;
+  --card: #1e293b;
+  --card-foreground: #e2e8f0;
+
+  --sidebar: #0f172a;
+  --sidebar-foreground: #cbd5e1;
+  --sidebar-border: #1e293b;
+  --sidebar-active: #172554;
+
+  --toolbar: #0f172a;
+  --toolbar-border: #1e293b;
+
+  --editor: #0f172a;
+  --editor-gutter: #1e293b;
+  --editor-line: #172554;
+
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --info: #3b82f6;
+
+  --scrollbar-thumb: #334155;
+  --scrollbar-track: transparent;
+  --selection-bg: #1e3a5f;
+  --hover-bg: #1e293b;
+  --hover: #1e293b;
+  --active-bg: #334155;
+  --divider: #1e293b;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.4);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.5);
+}
+
+/* ===== Global Styles ===== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ===== Hide Scrollbars ===== */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+*::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+  width: 0;
+  height: 0;
+}
+
+/* ===== Selection ===== */
+::selection {
+  background: var(--selection-bg);
+}
+
+/* ===== Focus ===== */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* ===== CodeMirror overrides ===== */
+.cm-editor {
+  height: 100%;
+  font-size: 13px;
+}
+
+.cm-editor .cm-scroller {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+/* ===== Utility classes ===== */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.truncate-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
