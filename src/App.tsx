@@ -1,39 +1,24 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useThemeStore } from './stores/themeStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { MainLayout } from './layouts/MainLayout';
 import { DialogProvider } from './components/ui/Dialog';
 import { MessageProvider } from './components/ui/Message';
 import { LockScreen } from './components/LockScreen';
-import { appDataDir } from '@tauri-apps/api/path';
-import { StoreManager } from './stores/tauriStorage';
 import { encryptionKeyManager } from './services/cryptoService';
 
 function App() {
   const applyTheme = useThemeStore((s) => s.applyTheme);
-  const [ready, setReady] = useState(false);
   const isLocked = useSettingsStore((s) => s.isLocked);
   const setLocked = useSettingsStore((s) => s.setLocked);
   const security = useSettingsStore((s) => s.security);
   const autoLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Initialize StoreManager: reads config.json to determine data path, then loads store
+  // StoreManager is already initialized in main.tsx before React renders.
+  // Apply theme on mount.
   useEffect(() => {
-    (async () => {
-      try {
-        const defaultPath = await appDataDir();
-        await StoreManager.init(defaultPath);
-      } catch (e) {
-        console.error('[App] Failed to initialize storage:', e);
-      } finally {
-        setReady(true);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (ready) applyTheme();
-  }, [ready, applyTheme]);
+    applyTheme();
+  }, [applyTheme]);
 
   // Disable browser default context menu globally
   useEffect(() => {
@@ -78,13 +63,11 @@ function App() {
 
   // Lock on startup if master password is enabled
   useEffect(() => {
-    if (ready && security.masterPasswordEnabled && security.passwordHash) {
+    if (security.masterPasswordEnabled && security.passwordHash) {
       encryptionKeyManager.lock();
       setLocked(true);
     }
-  }, [ready]); // Only on initial load
-
-  if (!ready) return null;
+  }, []); // Only on initial load
 
   return (
     <DialogProvider>
