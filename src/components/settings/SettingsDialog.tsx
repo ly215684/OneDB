@@ -6,12 +6,17 @@ import { Modal } from '../ui/Modal';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { Button } from '../ui/Button';
-import { Sun, Moon, Monitor, Globe, Type, Keyboard, Bot, Shield, Eye, EyeOff, Lock, Unlock, Clock, Info, Download, RefreshCw, CheckCircle, Loader2, ChevronDown } from 'lucide-react';
+import { Sun, Moon, Monitor, Globe, Type, Keyboard, Bot, Shield, Eye, EyeOff, Lock, Unlock, Clock, Info, Download, RefreshCw, CheckCircle, Loader2, ChevronDown, Database, FolderOpen, Upload, HardDrive, RotateCcw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useUpdateChecker } from '../../hooks/useUpdateChecker';
 import { AI_PROVIDERS } from '../../types/settings';
 import { testApiKey } from '../../services/aiService';
 import { useMessage } from '../ui/Message';
+import { open } from '@tauri-apps/plugin-dialog';
+import { appDataDir } from '@tauri-apps/api/path';
+import { StoreManager } from '../../stores/tauriStorage';
+import { generateSalt, hashPassword, encryptionKeyManager } from '../../services/cryptoService';
+import { encryptAllConnections, decryptAllConnections } from '../../stores/connectionStore';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -42,6 +47,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             { id: 'shortcuts', label: t('settings.shortcuts'), icon: <Keyboard size={14} /> },
             { id: 'ai', label: t('settings.aiSettings'), icon: <Bot size={14} /> },
             { id: 'security', label: t('settings.security'), icon: <Shield size={14} /> },
+            { id: 'storage', label: t('settings.storage'), icon: <Database size={14} /> },
             { id: 'about', label: t('settings.about'), icon: <Info size={14} /> },
           ].map((item) => (
             <button
@@ -190,6 +196,10 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             <SecuritySettingsPanel />
           )}
 
+          {activeTab === 'storage' && (
+            <StorageSettingsPanel />
+          )}
+
           {activeTab === 'about' && (
             <AboutPanel />
           )}
@@ -202,13 +212,18 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 function SecuritySettingsPanel() {
   const { t } = useTranslation();
   const settings = useSettingsStore();
+  const msg = useMessage();
   const [showMasterInput, setShowMasterInput] = useState(false);
   const [masterPassword, setMasterPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordMsg, setPasswordMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showPwd, setShowPwd] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  // For change password mode (when already enabled)
+  const [isChangeMode, setIsChangeMode] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
 
-  const handleSetMasterPassword = () => {
+  const handleSetMasterPassword = async () => {
     if (masterPassword.length < 6) {
       setPasswordMsg({ type: 'error', text: t('security.passwordTooShort', 'Password must be at least 6 characters') });
       return;
@@ -217,16 +232,87 @@ function SecuritySettingsPanel() {
       setPasswordMsg({ type: 'error', text: t('security.passwordMismatch', 'Passwords do not match') });
       return;
     }
-    settings.updateSecurity({ masterPasswordEnabled: true });
-    setPasswordMsg({ type: 'success', text: t('security.passwordSet', 'Master password set successfully') });
-    setShowMasterInput(false);
-    setMasterPassword('');
-    setConfirmPassword('');
+
+    setProcessing(true);
+    try {
+      if (isChangeMode) {
+        // Change password: verify old password, then re-derive key with new password
+        const currentHash = await hashPassword(oldPassword, settings.security.passwordSalt!);
+        if (currentHash !== settings.security.passwordHash) {
+          setPasswordMsg({ type: 'error', text: t('security.wrongPassword', 'Current password is incorrect') });
+          setProcessing(false);
+          return;
+        }
+        // Generate new salt and hash for the new password
+        const newSalt = generateSalt();
+        const newHash = await hashPassword(masterPassword, newSalt);
+        const newEncSalt = generateSalt();
+        // Set new key in memory
+        await encryptionKeyManager.setKey(masterPassword, newEncSalt);
+        settings.updateSecurity({
+          passwordHash: newHash,
+          passwordSalt: newSalt,
+          encryptionSalt: newEncSalt,
+        });
+        // Re-encrypt all connections with new key
+        await encryptAllConnections();
+        setPasswordMsg({ type: 'success', text: t('security.passwordChanged', 'Master password changed successfully') });
+      } else {
+        // First time enabling: generate salts, hash, derive key, encrypt all connections
+        const pwdSalt = generateSalt();
+        const encSalt = generateSalt();
+        const hash = await hashPassword(masterPassword, pwdSalt);
+        await encryptionKeyManager.setKey(masterPassword, encSalt);
+        settings.updateSecurity({
+          masterPasswordEnabled: true,
+          passwordHash: hash,
+          passwordSalt: pwdSalt,
+          encryptionSalt: encSalt,
+        });
+        // Encrypt existing connections
+        await encryptAllConnections();
+        setPasswordMsg({ type: 'success', text: t('security.passwordSet', 'Master password set successfully') });
+      }
+      setShowMasterInput(false);
+      setIsChangeMode(false);
+      setMasterPassword('');
+      setConfirmPassword('');
+      setOldPassword('');
+    } catch (e) {
+      setPasswordMsg({ type: 'error', text: String(e) });
+    } finally {
+      setProcessing(false);
+    }
   };
 
-  const handleDisableMasterPassword = () => {
-    settings.updateSecurity({ masterPasswordEnabled: false });
+  const handleDisableMasterPassword = async () => {
+    setProcessing(true);
+    try {
+      // Decrypt all connections before removing encryption
+      await decryptAllConnections();
+      encryptionKeyManager.lock();
+      settings.updateSecurity({
+        masterPasswordEnabled: false,
+        passwordHash: undefined,
+        passwordSalt: undefined,
+        encryptionSalt: undefined,
+      });
+      setPasswordMsg(null);
+      msg.success(t('security.encryptionDisabled', 'Encryption disabled'));
+    } catch (e) {
+      msg.error(String(e));
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleShowChangeInput = () => {
+    setIsChangeMode(true);
+    setShowMasterInput(true);
     setPasswordMsg(null);
+    setOldPassword('');
+    setMasterPassword('');
+    setConfirmPassword('');
   };
 
   return (
@@ -237,7 +323,10 @@ function SecuritySettingsPanel() {
       <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 border border-border">
         <Info size={14} className="text-muted-foreground mt-0.5 flex-shrink-0" />
         <p className="text-xs text-muted-foreground leading-relaxed">
-          {t('security.storageInfo', 'Connection passwords are encrypted and stored locally on your device using AES-256 encryption.')}
+          {settings.security.masterPasswordEnabled
+            ? t('security.encryptionActive', 'Connection passwords are encrypted with AES-256-GCM using your master password.')
+            : t('security.encryptionInactive', 'Enable master password to encrypt connection passwords. Currently stored in plain text.')
+          }
         </p>
       </div>
 
@@ -258,8 +347,10 @@ function SecuritySettingsPanel() {
                 type="checkbox"
                 className="sr-only peer"
                 checked={settings.security.masterPasswordEnabled}
+                disabled={processing}
                 onChange={(e) => {
                   if (e.target.checked) {
+                    setIsChangeMode(false);
                     setShowMasterInput(true);
                     setPasswordMsg(null);
                   } else {
@@ -277,7 +368,7 @@ function SecuritySettingsPanel() {
           <div className="flex items-center gap-2 text-xs text-green-600">
             <Lock size={12} />
             {t('security.masterPasswordEnabled', 'Master password is enabled')}
-            <Button variant="ghost" size="sm" className="h-6 text-xs ml-auto" onClick={() => { setShowMasterInput(true); setPasswordMsg(null); }}>
+            <Button variant="ghost" size="sm" className="h-6 text-xs ml-auto" onClick={handleShowChangeInput} disabled={processing}>
               {t('security.changePassword', 'Change')}
             </Button>
           </div>
@@ -285,6 +376,15 @@ function SecuritySettingsPanel() {
 
         {showMasterInput && (
           <div className="space-y-2 pl-6">
+            {isChangeMode && (
+              <Input
+                label={t('security.currentPassword', 'Current Password')}
+                type="password"
+                value={oldPassword}
+                onChange={(e) => setOldPassword(e.target.value)}
+                placeholder="••••••••"
+              />
+            )}
             <div className="relative">
               <Input
                 label={t('security.newPassword', 'New Password')}
@@ -309,10 +409,11 @@ function SecuritySettingsPanel() {
               placeholder="••••••••"
             />
             <div className="flex gap-2">
-              <Button size="sm" className="h-7 text-xs" onClick={handleSetMasterPassword}>
+              <Button size="sm" className="h-7 text-xs gap-1" onClick={handleSetMasterPassword} disabled={processing}>
+                {processing && <Loader2 size={12} className="animate-spin" />}
                 {t('security.save', 'Save')}
               </Button>
-              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setShowMasterInput(false)}>
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setShowMasterInput(false); setIsChangeMode(false); }} disabled={processing}>
                 {t('connection.cancel', 'Cancel')}
               </Button>
             </div>
@@ -339,6 +440,7 @@ function SecuritySettingsPanel() {
                 type="checkbox"
                 className="sr-only peer"
                 checked={settings.security.autoLockEnabled}
+                disabled={!settings.security.masterPasswordEnabled}
                 onChange={(e) => settings.updateSecurity({ autoLockEnabled: e.target.checked })}
               />
               <div className="w-8 h-4 bg-border rounded-full peer-checked:bg-primary transition-colors" />
@@ -346,7 +448,7 @@ function SecuritySettingsPanel() {
             </div>
           </label>
         </div>
-        {settings.security.autoLockEnabled && (
+        {settings.security.autoLockEnabled && settings.security.masterPasswordEnabled && (
           <div className="flex items-center gap-2 pl-6">
             <span className="text-xs text-muted-foreground">{t('security.lockAfter', 'Lock after')}</span>
             <input
@@ -380,6 +482,205 @@ function SecuritySettingsPanel() {
             <div className="absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform peer-checked:translate-x-4" />
           </div>
         </label>
+      </div>
+    </div>
+  );
+}
+
+function StorageSettingsPanel() {
+  const { t } = useTranslation();
+  const settings = useSettingsStore();
+  const msg = useMessage();
+  const [storageSize, setStorageSize] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [defaultPath, setDefaultPath] = useState('');
+
+  // Get default data file path from Tauri (appDataDir)
+  useEffect(() => {
+    appDataDir()
+      .then((dir) => setDefaultPath(dir))
+      .catch(() => setDefaultPath(''));
+  }, []);
+
+  // Calculate store data size
+  useEffect(() => {
+    (async () => {
+      try {
+        const mgr = StoreManager.getInstance();
+        const entries = await mgr.entries();
+        const json = JSON.stringify(Object.fromEntries(entries));
+        const kb = json.length / 1024;
+        setStorageSize(kb < 1 ? `${json.length} B` : `${kb.toFixed(1)} KB`);
+      } catch {
+        setStorageSize('N/A');
+      }
+    })();
+  }, []);
+
+  // Helper: collect all store data as JSON string
+  const collectStoreData = async (): Promise<string> => {
+    const mgr = StoreManager.getInstance();
+    const entries = await mgr.entries();
+    const data: Record<string, unknown> = {};
+    for (const [key, value] of entries) {
+      data[key] = value;
+    }
+    return JSON.stringify(data, null, 2);
+  };
+
+  // Helper: restore store data from JSON string
+  const restoreStoreData = async (json: string) => {
+    const mgr = StoreManager.getInstance();
+    const data = JSON.parse(json) as Record<string, unknown>;
+    await mgr.clear();
+    for (const [key, value] of Object.entries(data)) {
+      await mgr.set(key, value);
+    }
+  };
+
+  const handleSelectFolder = async () => {
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (!selected) return;
+      const newPath = selected as string;
+
+      // Switch store to new path (moves store file from old path)
+      const mgr = StoreManager.getInstance();
+      await mgr.switchPath(newPath);
+      settings.updateStorage({ dataStoragePath: newPath });
+      msg.success(t('settings.pathChanged'));
+    } catch (e) {
+      msg.error(t('settings.migrateFailed'));
+      console.error('Failed to select folder:', e);
+    }
+  };
+
+  const handleResetPath = async () => {
+    try {
+      // Reset store back to default path (appDataDir)
+      const mgr = StoreManager.getInstance();
+      await mgr.resetPath();
+      settings.updateStorage({ dataStoragePath: '' });
+      msg.success(t('settings.pathReset'));
+    } catch (e) {
+      msg.error(t('settings.migrateFailed'));
+      console.error('Failed to reset path:', e);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const json = await collectStoreData();
+      // Download backup via browser
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `onedb-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      msg.success(t('settings.exportSuccess'));
+    } catch (e) {
+      msg.error(t('settings.exportFailed'));
+      console.error('Export failed:', e);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    try {
+      let json = '';
+      // Import from file picker
+      json = await new Promise<string>((resolve, reject) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = () => {
+          const file = input.files?.[0];
+          if (!file) return reject(new Error('No file'));
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsText(file);
+        };
+        input.click();
+      });
+      await restoreStoreData(json);
+      msg.success(t('settings.importSuccess'));
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (e) {
+      msg.error(t('settings.importFailed'));
+      console.error('Import failed:', e);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <h3 className="text-sm font-semibold">{t('settings.storage')}</h3>
+
+      {/* Storage Info */}
+      <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 border border-border">
+        <HardDrive size={14} className="text-muted-foreground mt-0.5 flex-shrink-0" />
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          {t('settings.storagePathDesc')}
+        </p>
+      </div>
+
+      {/* Current Path */}
+      <div className="space-y-2">
+        <label className="text-xs text-muted-foreground font-medium">{t('settings.storagePath')}</label>
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-8 px-3 flex items-center text-xs rounded-md border border-border bg-muted/30 text-foreground truncate">
+            <FolderOpen size={12} className="mr-1.5 text-muted-foreground flex-shrink-0" />
+            <span className="truncate">
+              {settings.storage.dataStoragePath || defaultPath || t('settings.storagePathDefault')}
+            </span>
+          </div>
+          <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs shrink-0" onClick={handleSelectFolder}>
+            <FolderOpen size={12} />
+            {t('settings.selectFolder')}
+          </Button>
+          {settings.storage.dataStoragePath && (
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" onClick={handleResetPath} title={t('settings.resetPath')}>
+              <RotateCcw size={12} />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Storage Size */}
+      <div className="flex items-center justify-between py-2 border-b border-border">
+        <span className="text-xs text-muted-foreground">{t('settings.storageSize')}</span>
+        <span className="text-xs font-mono text-foreground">{storageSize}</span>
+      </div>
+
+      {/* Export / Import */}
+      <div className="flex items-center gap-3">
+        <Button
+          onClick={handleExport}
+          disabled={exporting}
+          size="sm"
+          className="gap-1.5"
+        >
+          {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+          {t('settings.exportData')}
+        </Button>
+        <Button
+          variant="outline"
+          onClick={handleImport}
+          disabled={importing}
+          size="sm"
+          className="gap-1.5"
+        >
+          {importing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+          {t('settings.importData')}
+        </Button>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { ThemeMode } from '../types/settings';
+import { tauriStorage } from './tauriStorage';
 
 interface ThemeState {
   mode: ThemeMode;
@@ -42,6 +43,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: 'onedb-theme',
+      storage: createJSONStorage(() => tauriStorage),
       partialize: (state) => ({ mode: state.mode }),
     }
   )

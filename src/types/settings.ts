@@ -7,6 +7,7 @@ export interface AppSettings {
   ai: AISettings;
   shortcuts: ShortcutSettings;
   security: SecuritySettings;
+  storage: StorageSettings;
 }
 
 export interface EditorSettings {
@@ -100,6 +101,13 @@ export interface SecuritySettings {
   autoLockEnabled: boolean;
   autoLockMinutes: number;
   showPasswords: boolean;
+  passwordHash?: string;    // PBKDF2 hash of master password (base64)
+  passwordSalt?: string;    // Salt for password hash (base64)
+  encryptionSalt?: string;  // Salt for encryption key derivation (base64)
+}
+
+export interface StorageSettings {
+  dataStoragePath: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -135,5 +143,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     autoLockEnabled: false,
     autoLockMinutes: 15,
     showPasswords: false,
+  },
+  storage: {
+    dataStoragePath: '',
   },
 };

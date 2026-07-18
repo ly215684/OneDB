@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { QueryResult } from '../types/connection';
+import { tauriStorage } from './tauriStorage';
 
 export interface QueryHistoryItem {
   id: string;
@@ -50,6 +51,7 @@ export const useQueryHistoryStore = create<QueryHistoryState>()(
     }),
     {
       name: 'onedb-query-history',
+      storage: createJSONStorage(() => tauriStorage),
     }
   )
 );

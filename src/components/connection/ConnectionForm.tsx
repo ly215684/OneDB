@@ -8,6 +8,7 @@ import { Input } from '../ui/Input';
 import { Tabs } from '../ui/Tabs';
 import { ArrowLeft, Link, FileText, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 import { clsx } from 'clsx';
+import { useSettingsStore } from '../../stores/settingsStore';
 
 interface ConnectionFormProps {
   type: DatabaseType;
@@ -20,6 +21,8 @@ interface ConnectionFormProps {
 export function ConnectionForm({ type, connection, onBack, onSave, onTest }: ConnectionFormProps) {
   const { t } = useTranslation();
   const dbInfo = DATABASE_TYPES.find((d) => d.type === type)!;
+  const showPasswords = useSettingsStore((s) => s.security.showPasswords);
+  const pwdType = showPasswords ? 'text' : 'password';
 
   const [mode, setMode] = useState<'form' | 'url'>('form');
   const [config, setConfig] = useState<ConnectionConfig>(connection?.config || {
@@ -95,7 +98,7 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Input label={t('connection.username')} value={config.username || ''} onChange={(e) => updateConfig('username', e.target.value)} />
-              <Input label={t('connection.password')} type="password" value={config.password || ''} onChange={(e) => updateConfig('password', e.target.value)} />
+              <Input label={t('connection.password')} type={pwdType} value={config.password || ''} onChange={(e) => updateConfig('password', e.target.value)} />
             </div>
             <Input label={t('connection.database')} value={config.database || ''} onChange={(e) => updateConfig('database', e.target.value)} />
             {type === 'postgresql' && (
@@ -125,7 +128,7 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Input label={t('connection.username')} value={config.username || ''} onChange={(e) => updateConfig('username', e.target.value)} />
-              <Input label={t('connection.password')} type="password" value={config.password || ''} onChange={(e) => updateConfig('password', e.target.value)} />
+              <Input label={t('connection.password')} type={pwdType} value={config.password || ''} onChange={(e) => updateConfig('password', e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Input label={t('connection.authDatabase')} value={config.authDatabase || ''} onChange={(e) => updateConfig('authDatabase', e.target.value)} placeholder="admin" />
@@ -140,7 +143,7 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
             <Input label={t('connection.srvAddress')} value={config.srvAddress || ''} onChange={(e) => updateConfig('srvAddress', e.target.value)} placeholder="cluster0.xxxxx.mongodb.net" />
             <div className="grid grid-cols-2 gap-3">
               <Input label={t('connection.username')} value={config.username || ''} onChange={(e) => updateConfig('username', e.target.value)} />
-              <Input label={t('connection.password')} type="password" value={config.password || ''} onChange={(e) => updateConfig('password', e.target.value)} />
+              <Input label={t('connection.password')} type={pwdType} value={config.password || ''} onChange={(e) => updateConfig('password', e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Input label={t('connection.authDatabase')} value={config.authDatabase || ''} onChange={(e) => updateConfig('authDatabase', e.target.value)} placeholder="admin" />
@@ -158,7 +161,7 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
               </div>
               <Input label={t('connection.port')} type="number" value={config.port || ''} onChange={(e) => updateConfig('port', parseInt(e.target.value))} />
             </div>
-            <Input label={t('connection.password')} type="password" value={config.password || ''} onChange={(e) => updateConfig('password', e.target.value)} />
+            <Input label={t('connection.password')} type={pwdType} value={config.password || ''} onChange={(e) => updateConfig('password', e.target.value)} />
             <Input label={t('connection.dbNumber')} type="number" value={config.dbNumber?.toString() || '0'} onChange={(e) => updateConfig('dbNumber', parseInt(e.target.value))} min={0} max={15} />
           </>
         );
