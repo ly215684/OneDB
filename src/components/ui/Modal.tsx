@@ -34,9 +34,6 @@ export function Modal({ open, onClose, title, children, width = 'max-w-2xl', cla
     <div
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-in"
-      onClick={(e) => {
-        if (e.target === overlayRef.current) onClose();
-      }}
     >
       <div className={clsx('bg-popover text-popover-foreground rounded-lg shadow-lg w-full mx-4 max-h-[85vh] flex flex-col animate-slide-in', width, className)}>
         {title && (

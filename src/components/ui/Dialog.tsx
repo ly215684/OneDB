@@ -231,7 +231,6 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
             'transition-opacity duration-150',
             animating ? 'opacity-100' : 'opacity-0'
           )}
-          onClick={handleCancel}
         >
           <div
             className={clsx(
