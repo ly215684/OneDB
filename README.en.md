@@ -1,5 +1,7 @@
 # OneDB
 
+![OneDB Logo](src-tauri/icons/128x128.png)
+
 An all-in-one database management desktop application built with **Tauri 2 + React 19 + TypeScript**.  
 Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities for SQL editing, data browsing, schema management, and import/export.
 
@@ -29,6 +31,7 @@ Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities fo
 - **Global Search** — `Ctrl+K` to quickly search connections, databases, and tables
 - **AI Panel** — Integrated AI-assisted SQL generation and analysis (interface reserved)
 - **Query History** — Records all executed SQL statements
+- **Secure Storage** — AES-256-GCM encrypted connection passwords, master password lock protection, custom data storage path support
 
 ### UI & Experience
 
@@ -64,6 +67,12 @@ Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities fo
 | SQLite | `rusqlite` (bundled) |
 | Redis | `redis` (tokio) |
 
+### Secure Storage
+
+- **Encryption** — AES-256-GCM symmetric encryption
+- **Key Derivation** — PBKDF2 + SHA-256 (100,000 iterations)
+- **Storage** — Tauri Store persistence with custom data path support
+
 ---
 
 ## Project Structure
@@ -83,10 +92,15 @@ OneDB/
 │   ├── hooks/                    # Custom React hooks
 │   ├── i18n/                     # Translation files (en/zh)
 │   ├── layouts/                  # Layout components (sidebar/toolbar/workspace)
-│   ├── services/                 # Frontend services (connection/import/export)
-│   ├── stores/                   # Zustand state stores
+│   ├── services/
+│   │   └── cryptoService.ts      # Crypto service (AES-256-GCM)
+│   ├── stores/
+│   │   ├── tauriStorage.ts       # Tauri Store adapter
+│   │   ├── connectionStore.ts    # Connection state management
+│   │   └── settingsStore.ts      # Settings state management
 │   └── types/                    # TypeScript type definitions
 ├── src-tauri/                    # Rust backend
+│   ├── icons/                    # Application icons
 │   └── src/
 │       ├── lib.rs                # Tauri command registration
 │       ├── main.rs               # Entry point
@@ -130,6 +144,13 @@ npm run tauri build
 3. **Browse Data** — Expand Database → Tables, double-click a table to open the data view
 4. **Run SQL** — Double-click a database to open the SQL editor, write queries and execute
 5. **Manage** — Right-click on connections/databases/tables to create, drop, import, export, and more
+6. **Security** — Configure a master password in settings; connection passwords are automatically encrypted
+
+---
+
+## Version
+
+v0.1.4
 
 ---
 

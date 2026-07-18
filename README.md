@@ -1,5 +1,7 @@
 # OneDB
 
+![OneDB Logo](src-tauri/icons/128x128.png)
+
 一体化数据库管理桌面工具，基于 **Tauri 2 + React 19 + TypeScript** 构建。  
 支持 MySQL、PostgreSQL、MongoDB、SQLite、Redis 五种主流数据库，提供 SQL 编辑、数据浏览、结构管理、导入导出等完整功能。
 
@@ -29,6 +31,7 @@
 - **全局搜索** — `Ctrl+K` 快速搜索连接、数据库、表
 - **AI 面板** — 集成 AI 辅助 SQL 生成与分析（预留接口）
 - **查询历史** — 记录所有执行过的 SQL 语句
+- **安全存储** — AES-256-GCM 加密连接密码，主密码锁定保护，支持自定义数据存储路径
 
 ### 界面与体验
 
@@ -64,6 +67,12 @@
 | SQLite | `rusqlite`（bundled） |
 | Redis | `redis`（tokio） |
 
+### 安全存储
+
+- **加密算法** — AES-256-GCM 对称加密
+- **密钥派生** — PBKDF2 + SHA-256（100,000 次迭代）
+- **存储方案** — Tauri Store 持久化，支持自定义数据路径
+
 ---
 
 ## 项目结构
@@ -83,10 +92,15 @@ OneDB/
 │   ├── hooks/                    # 自定义 Hooks
 │   ├── i18n/                     # 国际化翻译文件
 │   ├── layouts/                  # 布局组件（侧边栏/工具栏/工作区）
-│   ├── services/                 # 前端服务层（连接/导入/导出）
-│   ├── stores/                   # Zustand 状态管理
+│   ├── services/
+│   │   └── cryptoService.ts      # 加密服务（AES-256-GCM）
+│   ├── stores/
+│   │   ├── tauriStorage.ts       # Tauri Store 适配器
+│   │   ├── connectionStore.ts    # 连接状态管理
+│   │   └── settingsStore.ts      # 设置状态管理
 │   └── types/                    # TypeScript 类型定义
 ├── src-tauri/                    # Rust 后端
+│   ├── icons/                    # 应用图标
 │   └── src/
 │       ├── lib.rs                # Tauri 命令注册
 │       ├── main.rs               # 入口
@@ -130,16 +144,16 @@ npm run tauri build
 3. **浏览数据** — 展开数据库 → 表，双击表名打开数据视图
 4. **执行 SQL** — 双击数据库打开 SQL 编辑器，输入查询后执行
 5. **管理操作** — 右键连接/数据库/表，执行新建、删除、导入导出等操作
+6. **安全设置** — 在设置中配置主密码，连接密码将自动加密存储
+
+---
+
+## 版本
+
+v0.1.4
 
 ---
 
 ## 许可证
 
 MIT License
-# Tauri + React + Typescript
-
-This template should help get you started developing with Tauri, React and Typescript in Vite.
-
-## Recommended IDE Setup
-
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
