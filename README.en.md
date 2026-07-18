@@ -1,6 +1,8 @@
 # OneDB
 
-![OneDB Logo](src-tauri/icons/128x128.png)
+<p align="center">
+  <img src="src-tauri/icons/128x128.png" alt="OneDB Logo" />
+</p>
 
 An all-in-one database management desktop application built with **Tauri 2 + React 19 + TypeScript**.  
 Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities for SQL editing, data browsing, schema management, and import/export.

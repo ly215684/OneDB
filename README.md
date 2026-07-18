@@ -1,6 +1,8 @@
 # OneDB
 
-![OneDB Logo](src-tauri/icons/128x128.png)
+<p align="center">
+  <img src="src-tauri/icons/128x128.png" alt="OneDB Logo" />
+</p>
 
 一体化数据库管理桌面工具，基于 **Tauri 2 + React 19 + TypeScript** 构建。  
 支持 MySQL、PostgreSQL、MongoDB、SQLite、Redis 五种主流数据库，提供 SQL 编辑、数据浏览、结构管理、导入导出等完整功能。
