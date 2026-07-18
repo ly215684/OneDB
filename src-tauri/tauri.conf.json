@@ -38,7 +38,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYxNTYyNEYzRTJCRDhBMjEKUldRaGlyM2k4eVJXWVJ4ZUNiTFBidmM3R3NiVy8wU2hhZk9XQnhzSmY3MzNFaEp0SGZBN0xSV1MK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRFN0E3OUZGOTFBREM4RDQKUldUVXlLMlIvM2w2VGlRWXRLdHRjYUlkamtSMGd2Qnc5KzhJdlRqQmVhQnJIUjFVUFV0T1ZyajIK",
       "endpoints": [
         "https://github.com/ly215684/OneDB/releases/latest/download/latest.json"
       ],
