@@ -163,7 +163,7 @@ npm run tauri build
 
 ## 版本
 
-v0.1.6
+v0.2.0
 
 ---
 
