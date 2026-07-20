@@ -2,10 +2,10 @@ import { useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import { useAIStore } from '../stores/aiStore';
+import type { PendingWriteInfo } from '../stores/aiStore';
 import { useTabStore } from '../stores/tabStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useConnectionStore } from '../stores/connectionStore';
-import { getTableStructure } from '../services/connectionService';
 import { chatStream, extractSqlFromResponse } from '../services/aiService';
 import {
   PanelRightClose,
@@ -19,114 +19,50 @@ import {
   Check,
   Square,
   Settings,
-  Table2,
-  X,
   Loader2,
-  Quote,
+  Wrench,
+  AlertTriangle,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { useMessage } from '../components/ui/Message';
 import { clsx } from 'clsx';
 
-// ─── Table Selection Dialog ────────────────────────────────
+// ─── Write Confirmation Dialog ────────────────────────────────
 
-function TableSelectDialog({
-  open,
-  onClose,
+function WriteConfirmDialog({
+  pending,
   onConfirm,
+  onCancel,
 }: {
-  open: boolean;
-  onClose: () => void;
-  onConfirm: (connId: string, db: string, table: string) => void;
+  pending: PendingWriteInfo | null;
+  onConfirm: () => void;
+  onCancel: () => void;
 }) {
   const { t } = useTranslation();
-  const connections = useConnectionStore((s) => s.connections);
-  const [connId, setConnId] = useState('');
-  const [db, setDb] = useState('');
-  const [table, setTable] = useState('');
-
-  const conn = connections.find((c) => c.id === connId);
-  const databases = conn?.databases || [];
-  const dbInfo = databases.find((d) => d.name === db);
-  const tables = [
-    ...(dbInfo?.tables || []),
-    ...(dbInfo?.collections || []).map((c) => ({ name: c.name })),
-  ];
-  const connectedConns = connections.filter((c) => c.isConnected);
-
-  const handleConnChange = (id: string) => {
-    setConnId(id);
-    setDb('');
-    setTable('');
-  };
-  const handleDbChange = (name: string) => {
-    setDb(name);
-    setTable('');
-  };
+  if (!pending) return null;
 
   return (
-    <Modal open={open} onClose={onClose} title={t('ai.selectTableContext')} width="max-w-md">
+    <Modal
+      open={true}
+      onClose={onCancel}
+      title={t('ai.confirmWriteTitle')}
+      width="max-w-lg"
+    >
       <div className="p-4 space-y-4">
-        {/* Connection */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs text-muted-foreground font-medium">{t('ai.selectConnection')}</label>
-          <select
-            className="h-8 px-3 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
-            value={connId}
-            onChange={(e) => handleConnChange(e.target.value)}
-          >
-            <option value="">{t('ai.selectConnection')}</option>
-            {connectedConns.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+        <div className="flex items-center gap-2 text-sm text-destructive">
+          <AlertTriangle size={16} />
+          <span>{t('ai.confirmWriteMessage', { connection: pending.connection, database: pending.database })}</span>
         </div>
-
-        {/* Database */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs text-muted-foreground font-medium">{t('ai.selectDatabase')}</label>
-          <select
-            className="h-8 px-3 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-colors disabled:opacity-50"
-            value={db}
-            onChange={(e) => handleDbChange(e.target.value)}
-            disabled={!connId}
-          >
-            <option value="">{t('ai.selectDatabase')}</option>
-            {databases.map((d) => (
-              <option key={d.name} value={d.name}>{d.name}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Table */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs text-muted-foreground font-medium">{t('ai.selectTable')}</label>
-          <select
-            className="h-8 px-3 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-colors disabled:opacity-50"
-            value={table}
-            onChange={(e) => setTable(e.target.value)}
-            disabled={!db}
-          >
-            <option value="">{t('ai.selectTable')}</option>
-            {tables.map((tbl) => (
-              <option key={tbl.name} value={tbl.name}>{tbl.name}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Actions */}
+        <pre className="text-xs font-mono bg-background border border-border rounded p-3 overflow-x-auto max-h-48 whitespace-pre-wrap">
+          {pending.query}
+        </pre>
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button
-            size="sm"
-            disabled={!connId || !db || !table}
-            onClick={() => {
-              onConfirm(connId, db, table);
-              onClose();
-            }}
-          >
-            {t('common.confirm')}
+          <Button variant="outline" size="sm" onClick={onCancel}>
+            {t('ai.cancelExecute')}
+          </Button>
+          <Button variant="destructive" size="sm" onClick={onConfirm}>
+            {t('ai.confirmExecute')}
           </Button>
         </div>
       </div>
@@ -149,92 +85,17 @@ export function AIPanel() {
   const setThinking = useAIStore((s) => s.setThinking);
   const abort = useAIStore((s) => s.abort);
   const setAbortController = useAIStore((s) => s.setAbortController);
+  const toolCallStatus = useAIStore((s) => s.toolCallStatus);
+  const setToolCallStatus = useAIStore((s) => s.setToolCallStatus);
+  const pendingWrite = useAIStore((s) => s.pendingWrite);
+  const setPendingWrite = useAIStore((s) => s.setPendingWrite);
+  const confirmWrite = useAIStore((s) => s.confirmWrite);
+  const cancelWrite = useAIStore((s) => s.cancelWrite);
   const aiSettings = useSettingsStore((s) => s.ai);
   const connections = useConnectionStore((s) => s.connections);
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // ─── Table selection dialog ───
-  const [showTableDialog, setShowTableDialog] = useState(false);
-
-  // ─── Schema context ───
-  const [schemaContext, setSchemaContext] = useState('');
-  const [schemaLabel, setSchemaLabel] = useState('');
-  const [loadingSchema, setLoadingSchema] = useState(false);
-  // Store last referenced connection for SQL execution
-  const [lastRefConnId, setLastRefConnId] = useState<string>('');
-  const [lastRefDatabase, setLastRefDatabase] = useState<string>('');
-
-  // Build context from table structure (metadata always, DDL if available)
-  const buildDDL = useCallback(async (connId: string, database: string, tableName: string) => {
-    const conn = connections.find((c) => c.id === connId);
-    if (!conn || conn.type === 'redis') return;
-
-    setSchemaLabel(`${conn.name} › ${database} › ${tableName}`);
-    setLoadingSchema(true);
-    // Store connection info for SQL execution
-    setLastRefConnId(connId);
-    setLastRefDatabase(database);
-
-    // Always set base metadata context
-    let context = `-- Database Type: ${conn.type}\n-- Database: ${database}\n-- Table: ${tableName}`;
-
-    try {
-      const structure = await getTableStructure(conn.type, conn.config, database, tableName);
-      console.log('[AI] Table structure:', structure);
-
-      const cols = structure.columns.map((c) => {
-        const parts = [`  ${c.name} ${c.type}`];
-        if (c.primary_key) parts.push('PRIMARY KEY');
-        if (c.auto_increment) parts.push('AUTO_INCREMENT');
-        if (!c.nullable) parts.push('NOT NULL');
-        if (c.default_value) parts.push(`DEFAULT ${c.default_value}`);
-        if (c.comment) parts.push(`COMMENT '${c.comment}'`);
-        return parts.join(' ');
-      });
-      let ddl = `CREATE TABLE ${tableName} (\n${cols.join(',\n')}\n);`;
-
-      if (structure.indexes && structure.indexes.length > 0) {
-        ddl += '\n';
-        for (const idx of structure.indexes) {
-          const unique = idx.unique ? 'UNIQUE ' : '';
-          ddl += `\nCREATE ${unique}INDEX ${idx.name} ON ${tableName} (${idx.columns.join(', ')});`;
-        }
-      }
-
-      if (structure.foreign_keys && structure.foreign_keys.length > 0) {
-        ddl += '\n';
-        for (const fk of structure.foreign_keys) {
-          ddl += `\nALTER TABLE ${tableName} ADD CONSTRAINT ${fk.name} FOREIGN KEY (${fk.columns.join(', ')}) REFERENCES ${fk.referenced_table} (${fk.referenced_columns.join(', ')})`;
-          if (fk.on_delete) ddl += ` ON DELETE ${fk.on_delete}`;
-          if (fk.on_update) ddl += ` ON UPDATE ${fk.on_update}`;
-          ddl += ';';
-        }
-      }
-
-      context += `\n\n${ddl}`;
-      console.log('[AI] Full context:', context);
-      setSchemaContext(context);
-      message.success(`${t('ai.schemaLoaded')}: ${tableName}`);
-    } catch (err) {
-      console.warn('[AI] Table structure not available, using metadata only:', err);
-      // DDL not available, but metadata is still useful
-      setSchemaContext(context);
-      message.info(`${t('ai.schemaMetaOnly')}: ${tableName}`);
-    } finally {
-      setLoadingSchema(false);
-    }
-  }, [connections, message, t]);
-
-  const handleTableConfirm = useCallback((connId: string, db: string, table: string) => {
-    buildDDL(connId, db, table);
-  }, [buildDDL]);
-
-  const clearSchema = useCallback(() => {
-    setSchemaContext('');
-    setSchemaLabel('');
-  }, []);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -242,6 +103,13 @@ export function AIPanel() {
       if (el) el.scrollTop = el.scrollHeight;
     });
   }, []);
+
+  // Write confirmation handler - returns a promise that resolves when user confirms/cancels
+  const handleWriteConfirm = useCallback((info: { connection: string; database: string; query: string }): Promise<boolean> => {
+    return new Promise<boolean>((resolve) => {
+      setPendingWrite({ ...info, resolve });
+    });
+  }, [setPendingWrite]);
 
   const handleSend = useCallback((overrideContent?: string) => {
     const content = overrideContent ?? input;
@@ -260,30 +128,6 @@ export function AIPanel() {
       .slice(0, -1)
       .map((m) => ({ role: m.role, content: m.content }));
 
-    // Inject schema context and clear after injection (one-time use)
-    if (schemaContext) {
-      // Add MongoDB hint if applicable
-      const isMongo = schemaContext.includes('Database Type: mongodb');
-      const mongoHint = isMongo
-        ? '\nIMPORTANT: This is a MongoDB connection. You MUST generate JSON format queries wrapped in ```json code blocks. Example: ```json\n{"collection": "' + (schemaContext.match(/-- Table: (.+)/)?.[1] || 'collection_name') + '", "operation": "find", "filter": {}, "limit": 100}\n```\nDo NOT generate SQL syntax for MongoDB.'
-        : '';
-      const schemaBlock = `\n\n---\n[Referenced Table Context]\n\`\`\`sql\n${schemaContext}\n\`\`\`${mongoHint}\nPlease use this table information to answer my question.`;
-      const lastUserIdx = (() => {
-        for (let i = history.length - 1; i >= 0; i--) {
-          if (history[i].role === 'user') return i;
-        }
-        return -1;
-      })();
-      if (lastUserIdx >= 0) {
-        history[lastUserIdx].content = history[lastUserIdx].content + schemaBlock;
-      } else {
-        history.unshift({ role: 'user' as const, content: `[Referenced Table Context]\n\`\`\`sql\n${schemaContext}\n\`\`\`\nPlease use this table information.` });
-      }
-      // Clear after injection so next message requires re-referencing
-      setSchemaContext('');
-      setSchemaLabel('');
-    }
-
     let accumulated = '';
 
     chatStream(history, aiSettings, {
@@ -295,12 +139,14 @@ export function AIPanel() {
       onComplete: () => {
         setThinking(false);
         setAbortController(null);
+        setToolCallStatus('');
         const sql = extractSqlFromResponse(accumulated);
         if (sql) setMessageSql(assistantId, sql);
       },
       onError: (error) => {
         setThinking(false);
         setAbortController(null);
+        setToolCallStatus('');
         message.error(error);
         updateMessageContent(assistantId, error);
         useAIStore.setState((state) => ({
@@ -309,10 +155,15 @@ export function AIPanel() {
           ),
         }));
       },
-    }, controller.signal).catch((err) => {
+      onToolCall: (status) => {
+        setToolCallStatus(status);
+      },
+      onWriteConfirm: handleWriteConfirm,
+    }, controller.signal, connections).catch((err) => {
       console.error('[AI] Unexpected chatStream error:', err);
       setThinking(false);
       setAbortController(null);
+      setToolCallStatus('');
       const errMsg = err instanceof Error ? err.message : String(err);
       message.error(errMsg);
       updateMessageContent(assistantId, `Error: ${errMsg}`);
@@ -322,7 +173,7 @@ export function AIPanel() {
         ),
       }));
     });
-  }, [input, isThinking, addMessage, updateMessageContent, setMessageSql, setThinking, setAbortController, aiSettings, scrollToBottom, schemaContext, message]);
+  }, [input, isThinking, addMessage, updateMessageContent, setMessageSql, setThinking, setAbortController, aiSettings, scrollToBottom, message, connections, setToolCallStatus, handleWriteConfirm]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -332,10 +183,9 @@ export function AIPanel() {
   };
 
   const handleExecuteSql = useCallback((sql: string) => {
-    // Use last referenced connection, or fallback to active tab's connection
     const activeTab = useTabStore.getState().getActiveTab();
-    const connId = lastRefConnId || activeTab?.connectionId || undefined;
-    const dbName = lastRefDatabase || activeTab?.database || undefined;
+    const connId = activeTab?.connectionId || undefined;
+    const dbName = activeTab?.database || undefined;
     useTabStore.getState().addTab({
       type: 'sql-editor',
       title: 'AI Query',
@@ -343,16 +193,15 @@ export function AIPanel() {
       database: dbName,
       data: { sql },
     });
-  }, [lastRefConnId, lastRefDatabase]);
+  }, []);
 
   const handleInsertToEditor = useCallback((sql: string) => {
     const activeTab = useTabStore.getState().getActiveTab();
     if (activeTab && activeTab.type === 'sql-editor') {
       useTabStore.getState().updateTab(activeTab.id, { data: { ...activeTab.data, sql } });
     } else {
-      // Use last referenced connection, or fallback to active tab's connection
-      const connId = lastRefConnId || activeTab?.connectionId || undefined;
-      const dbName = lastRefDatabase || activeTab?.database || undefined;
+      const connId = activeTab?.connectionId || undefined;
+      const dbName = activeTab?.database || undefined;
       useTabStore.getState().addTab({
         type: 'sql-editor',
         title: 'AI Query',
@@ -361,7 +210,7 @@ export function AIPanel() {
         data: { sql },
       });
     }
-  }, [lastRefConnId, lastRefDatabase]);
+  }, []);
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const handleCopyWithFeedback = useCallback((sql: string, msgId: string) => {
@@ -436,8 +285,9 @@ export function AIPanel() {
                 {isConfigured ? t('ai.inputPlaceholder') : t('ai.notConfigured')}
               </p>
               {isConfigured && (
-                <p className="text-2xs text-muted-foreground/60 mt-2">
-                  💡 {t('ai.refHint')}
+                <p className="text-2xs text-muted-foreground/60 mt-2 flex items-center justify-center gap-1">
+                  <Wrench size={10} />
+                  {t('ai.mcpHint')}
                 </p>
               )}
               {!isConfigured && (
@@ -514,11 +364,18 @@ export function AIPanel() {
                 <Bot size={12} className="text-primary" />
               </div>
               <div className="bg-muted rounded-lg px-3 py-2 text-xs text-muted-foreground flex items-center gap-1.5">
-                <span className="flex gap-0.5">
-                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '300ms' }} />
-                </span>
+                {toolCallStatus ? (
+                  <>
+                    <Loader2 size={10} className="animate-spin" />
+                    <span className="text-2xs">{toolCallStatus}</span>
+                  </>
+                ) : (
+                  <span className="flex gap-0.5">
+                    <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1 h-1 rounded-full bg-current animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -545,40 +402,6 @@ export function AIPanel() {
 
       {/* Input area */}
       <div className="p-3 border-t border-sidebar-border">
-        {/* Schema badge */}
-        {(schemaLabel || loadingSchema) && (
-          <div className="mb-2 flex items-center gap-1.5">
-            {loadingSchema ? (
-              <div className="flex items-center gap-1.5 text-2xs text-muted-foreground">
-                <Loader2 size={10} className="animate-spin" />
-                {t('ai.loadingSchema')}
-              </div>
-            ) : (
-              <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-2xs font-medium">
-                <Table2 size={10} />
-                <span className="truncate max-w-48">{schemaLabel}</span>
-                <button onClick={clearSchema} className="ml-0.5 hover:text-destructive transition-colors">
-                  <X size={10} />
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Toolbar: reference button */}
-        <div className="flex items-center gap-1 mb-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 text-2xs gap-1"
-            onClick={() => setShowTableDialog(true)}
-            disabled={!isConfigured}
-          >
-            <Quote size={12} />
-            {t('ai.refTable')}
-          </Button>
-        </div>
-
         <div className="flex gap-2">
           <textarea
             ref={textareaRef}
@@ -602,11 +425,11 @@ export function AIPanel() {
         </div>
       </div>
 
-      {/* Table selection dialog */}
-      <TableSelectDialog
-        open={showTableDialog}
-        onClose={() => setShowTableDialog(false)}
-        onConfirm={handleTableConfirm}
+      {/* Write confirmation dialog */}
+      <WriteConfirmDialog
+        pending={pendingWrite}
+        onConfirm={confirmWrite}
+        onCancel={cancelWrite}
       />
     </div>
   );

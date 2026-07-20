@@ -10,11 +10,20 @@ export interface AIMessage {
   isError?: boolean;
 }
 
+export interface PendingWriteInfo {
+  connection: string;
+  database: string;
+  query: string;
+  resolve: (confirmed: boolean) => void;
+}
+
 interface AIState {
   messages: AIMessage[];
   isThinking: boolean;
   isVisible: boolean;
   abortController: AbortController | null;
+  toolCallStatus: string;
+  pendingWrite: PendingWriteInfo | null;
   addMessage: (msg: Omit<AIMessage, 'id' | 'timestamp'>) => string;
   updateMessageContent: (id: string, content: string) => void;
   setMessageSql: (id: string, sql: string | null) => void;
@@ -24,6 +33,10 @@ interface AIState {
   toggleVisible: () => void;
   setAbortController: (c: AbortController | null) => void;
   abort: () => void;
+  setToolCallStatus: (status: string) => void;
+  setPendingWrite: (info: PendingWriteInfo | null) => void;
+  confirmWrite: () => void;
+  cancelWrite: () => void;
 }
 
 export const useAIStore = create<AIState>()((set, get) => ({
@@ -31,6 +44,8 @@ export const useAIStore = create<AIState>()((set, get) => ({
   isThinking: false,
   isVisible: true,
   abortController: null,
+  toolCallStatus: '',
+  pendingWrite: null,
 
   addMessage: (msg) => {
     const id = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -66,7 +81,27 @@ export const useAIStore = create<AIState>()((set, get) => ({
     const ctrl = get().abortController;
     if (ctrl) {
       ctrl.abort();
-      set({ abortController: null, isThinking: false });
+      set({ abortController: null, isThinking: false, toolCallStatus: '' });
+    }
+  },
+
+  setToolCallStatus: (status) => set({ toolCallStatus: status }),
+
+  setPendingWrite: (info) => set({ pendingWrite: info }),
+
+  confirmWrite: () => {
+    const pending = get().pendingWrite;
+    if (pending) {
+      pending.resolve(true);
+      set({ pendingWrite: null });
+    }
+  },
+
+  cancelWrite: () => {
+    const pending = get().pendingWrite;
+    if (pending) {
+      pending.resolve(false);
+      set({ pendingWrite: null });
     }
   },
 }));
