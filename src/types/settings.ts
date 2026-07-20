@@ -23,7 +23,23 @@ export interface AIProvider {
   id: string;
   name: string;
   baseUrl: string;
-  models: { id: string; name: string }[];
+  models: { id: string; name: string; noTools?: boolean }[];
+}
+
+/** Models known to NOT support function calling (reasoning/vision models) */
+const NO_TOOLS_MODEL_PATTERNS = [
+  'thinking',
+  'reasoner',
+  '-vision',
+  '4v',
+  '4.1v',
+];
+
+/** Check if a model likely supports function calling */
+export function modelSupportsTools(modelId: string): boolean {
+  if (!modelId) return false;
+  const lower = modelId.toLowerCase();
+  return !NO_TOOLS_MODEL_PATTERNS.some((p) => lower.includes(p));
 }
 
 export const AI_PROVIDERS: AIProvider[] = [
@@ -66,7 +82,7 @@ export const AI_PROVIDERS: AIProvider[] = [
     baseUrl: 'https://api.deepseek.com/v1',
     models: [
       { id: 'deepseek-chat', name: 'DeepSeek Chat' },
-      { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' },
+      { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', noTools: true },
     ],
   },
   {

@@ -125,7 +125,10 @@
     "enterDbName": "Enter database name",
     "createDbFailed": "Failed to create database",
     "sqliteNoCreateDb": "SQLite is file-based and does not support creating databases",
-    "redisNoCreateDb": "Redis only supports db0-db15 and does not support creating databases"
+    "redisNoCreateDb": "Redis only supports db0-db15 and does not support creating databases",
+    "disableAI": "Disable AI Access",
+    "enableAI": "Enable AI Access",
+    "aiDisabledHint": "AI disabled, MCP tools will not access this connection"
   },
   "database": {
     "mysql": "MySQL",
@@ -164,10 +167,11 @@
     "success": "Execution successful",
     "error": "Execution failed",
     "noResults": "No query results",
+    "statementsExecuted": "statements executed",
     "copySql": "Copy SQL",
     "insertToEditor": "Insert to Editor",
-    "mongoJsonFormat": "MongoDB requires JSON format queries. find: {\"collection\": \"users\", \"operation\": \"find\", \"filter\": {}, \"limit\": 100} | insertMany: {\"collection\": \"users\", \"operation\": \"insertMany\", \"documents\": [{\"name\": \"Alice\"}]}",
-        "mongoPlaceholder": "{\n  \"collection\": \"users\",\n  \"operation\": \"find\",\n  \"filter\": {},\n  \"limit\": 100\n}"
+    "mongoJsonFormat": "MongoDB requires JSON format queries (single object or array). find: {\"collection\": \"users\", \"operation\": \"find\", \"filter\": {}, \"limit\": 100} | batch: [{...}, {...}]",
+        "mongoPlaceholder": "{\n  \"collection\": \"users\",\n  \"operation\": \"find\",\n  \"filter\": {},\n  \"limit\": 100\n}\n// Array batch execution:\n// [{...}, {...}]"
   },
   "table": {
     "data": "Data",
@@ -264,9 +268,20 @@
     "confirmWriteMessage": "About to execute the following on {{connection}} / {{database}}:",
     "confirmExecute": "Confirm Execute",
     "cancelExecute": "Cancel",
+    "sendToEditor": "Send to Editor",
     "writeCancelled": "Operation cancelled",
     "schemaLoadFailed": "Failed to load schema",
-    "modelPlaceholder": "Select or type model name"
+    "modelPlaceholder": "Select or type model name",
+    "modelNoToolsWarning": "Current model does not support tool calling. AI cannot explore databases automatically. Please switch to a model that supports Function Calling.",
+    "showThinking": "Show thinking process",
+    "hideThinking": "Hide thinking process",
+    "tool": {
+      "listConnections": "List Connections",
+      "listDatabases": "List Databases",
+      "listTables": "List Tables",
+      "describeTable": "Describe Table",
+      "executeQuery": "Execute Query"
+    }
   },
   "settings": {
     "title": "Settings",

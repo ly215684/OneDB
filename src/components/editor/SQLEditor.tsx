@@ -12,6 +12,7 @@ import { Button } from '../ui/Button';
 import { Tooltip } from '../ui/Tooltip';
 import { DropdownMenu } from '../ui/DropdownMenu';
 import { exportToFile } from '../../services/exportService';
+import { splitSqlStatements } from '../../utils/sqlSplitter';
 
 interface SQLEditorProps {
   tabId: string;
@@ -23,7 +24,7 @@ interface SQLEditorProps {
 export function SQLEditor({ tabId, connectionId, database: initialDatabase, initialSql = '' }: SQLEditorProps) {
   const { t } = useTranslation();
   const [sql, setSql] = useState(initialSql);
-  const [result, setResult] = useState<QueryResult | null>(null);
+  const [results, setResults] = useState<QueryResult[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedDb, setSelectedDb] = useState(initialDatabase || '');
@@ -78,42 +79,95 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
   const handleExecute = useCallback(async (sqlText: string, _selectedOnly: boolean) => {
     if (!sqlText.trim()) return;
     setIsExecuting(true);
-    setResult(null);
+    setResults([]);
     try {
       const conn = activeConnId ? getConnection(activeConnId) : undefined;
       if (!conn) {
-        setResult({ columns: [], rows: [], rowCount: 0, duration: 0, success: false, error: 'No active connection.' });
+        setResults([{ columns: [], rows: [], rowCount: 0, duration: 0, success: false, error: 'No active connection.' }]);
         setIsExecuting(false);
         return;
       }
-      // Validate MongoDB query format
+
       const isMongo = conn.type === 'mongodb' || conn.type === 'mongodb_srv';
+      const isRedis = conn.type === 'redis';
+
+      // For Redis, treat entire text as a single statement
+      if (isRedis) {
+        const queryResult = await executeQuery(conn.type, conn.config, sqlText, selectedDb || undefined);
+        setResults([queryResult]);
+        if (activeConnId) {
+          addHistory({ sql: sqlText, connectionId: activeConnId, result: queryResult, duration: queryResult.duration });
+        }
+        setIsExecuting(false);
+        return;
+      }
+
+      // For MongoDB, support single object or array of operations
       if (isMongo) {
+        let parsed: unknown;
         try {
-          JSON.parse(sqlText.trim());
+          parsed = JSON.parse(sqlText.trim());
         } catch {
-          setResult({
+          setResults([{
             columns: [], rows: [], rowCount: 0, duration: 0, success: false,
             error: t('editor.mongoJsonFormat'),
-          });
+          }]);
           setIsExecuting(false);
           return;
         }
+
+        // If array, execute each operation individually
+        const operations: string[] = Array.isArray(parsed)
+          ? (parsed as unknown[]).map(op => JSON.stringify(op))
+          : [sqlText.trim()];
+
+        const allResults: QueryResult[] = [];
+        for (const op of operations) {
+          const queryResult = await executeQuery(conn.type, conn.config, op, selectedDb || undefined);
+          allResults.push(queryResult);
+          if (activeConnId) {
+            addHistory({ sql: op, connectionId: activeConnId, result: queryResult, duration: queryResult.duration });
+          }
+          // Stop on first error
+          if (!queryResult.success) break;
+        }
+        setResults(allResults);
+        setIsExecuting(false);
+        return;
       }
-      const queryResult = await executeQuery(conn.type, conn.config, sqlText, selectedDb || undefined);
-      setResult(queryResult);
-      if (activeConnId) {
-        addHistory({ sql: sqlText, connectionId: activeConnId, result: queryResult, duration: queryResult.duration });
+
+      // For SQL databases: split into individual statements
+      const statements = splitSqlStatements(sqlText);
+
+      if (statements.length === 0) {
+        setIsExecuting(false);
+        return;
       }
+
+      const allResults: QueryResult[] = [];
+      for (const stmt of statements) {
+        const queryResult = await executeQuery(conn.type, conn.config, stmt, selectedDb || undefined);
+        allResults.push(queryResult);
+        if (activeConnId) {
+          addHistory({ sql: stmt, connectionId: activeConnId, result: queryResult, duration: queryResult.duration });
+        }
+        // Stop on first error
+        if (!queryResult.success) break;
+      }
+      setResults(allResults);
     } catch (error) {
-      setResult({ columns: [], rows: [], rowCount: 0, duration: 0, success: false, error: String(error) });
+      setResults([{ columns: [], rows: [], rowCount: 0, duration: 0, success: false, error: String(error) }]);
     } finally {
       setIsExecuting(false);
     }
-  }, [activeConnId, selectedDb, addHistory, getConnection]);
+  }, [activeConnId, selectedDb, addHistory, getConnection, t]);
 
-  const handleClear = () => { setSql(''); setResult(null); };
-  const handleExport = (format: 'csv' | 'json' | 'sql-insert') => { if (result) exportToFile(result, format, 'query_result'); };
+  const handleClear = () => { setSql(''); setResults([]); };
+  const handleExport = (format: 'csv' | 'json' | 'sql-insert') => {
+    // Export the last successful result
+    const lastSuccess = [...results].reverse().find(r => r.success);
+    if (lastSuccess) exportToFile(lastSuccess, format, 'query_result');
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -182,7 +236,7 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowHistory(!showHistory)}><Clock size={14} /></Button>
         </Tooltip>
         <div className="flex-1" />
-        {result && (
+        {results.length > 0 && (
           <DropdownMenu
             items={[
               { label: t('table.exportCsv'), onClick: () => handleExport('csv') },
@@ -220,7 +274,7 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
       </div>
       <div className="h-1 bg-border cursor-row-resize hover:bg-primary/30 transition-colors flex-shrink-0" />
       <div className="min-h-0 overflow-hidden" style={{ flex: '1 1 0%' }}>
-        <ResultPanel result={result} isExecuting={isExecuting} />
+        <ResultPanel results={results} isExecuting={isExecuting} />
       </div>
     </div>
   );

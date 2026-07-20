@@ -37,6 +37,7 @@ import {
   Layers,
   Eraser,
   Loader2,
+  BotOff,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { ScrollArea } from '../components/ui/ScrollArea';
@@ -56,6 +57,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
   const removeConnection = useConnectionStore((s) => s.removeConnection);
   const duplicateConnection = useConnectionStore((s) => s.duplicateConnection);
   const getConnection = useConnectionStore((s) => s.getConnection);
+  const toggleAIDisabled = useConnectionStore((s) => s.toggleAIDisabled);
   const addTab = useTabStore((s) => s.addTab);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -614,6 +616,11 @@ export function Sidebar({ width = 260 }: SidebarProps) {
                       {conn.isConnected && (
                         <Circle size={8} className="text-green-500 fill-green-500 flex-shrink-0" />
                       )}
+                      {conn.aiDisabled && (
+                        <span title={t('connection.aiDisabledHint')}>
+                          <BotOff size={10} className="text-muted-foreground/50 flex-shrink-0" />
+                        </span>
+                      )}
                     </div>
 
                     {/* Expanded Tree */}
@@ -786,6 +793,13 @@ export function Sidebar({ width = 260 }: SidebarProps) {
               label: t('connection.duplicate'),
               icon: <Copy size={12} />,
               onClick: () => handleDuplicate(contextMenu.connectionId),
+            },
+            {
+              label: connections.find((c) => c.id === contextMenu.connectionId)?.aiDisabled
+                ? t('connection.enableAI')
+                : t('connection.disableAI'),
+              icon: <BotOff size={12} />,
+              onClick: () => toggleAIDisabled(contextMenu.connectionId),
             },
             { separator: true, label: '' },
             {

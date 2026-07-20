@@ -1,4 +1,5 @@
 import type { AISettings } from '../types/settings';
+import { modelSupportsTools } from '../types/settings';
 import type { Connection } from '../types/connection';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -19,7 +20,7 @@ interface StreamCallbacks {
   onToken: (token: string) => void;
   onComplete: () => void;
   onError: (error: string) => void;
-  onToolCall?: (status: string) => void;
+  onToolCall?: (info: { id: string; name: string; args: Record<string, string>; status: 'calling' | 'done' }) => void;
   onWriteConfirm?: (info: { connection: string; database: string; query: string }) => Promise<boolean>;
 }
 
@@ -181,13 +182,13 @@ async function executeToolCall(
     switch (toolName) {
       case 'list_connections': {
         const connected = connections
-          .filter((c) => c.isConnected)
+          .filter((c) => c.isConnected && !c.aiDisabled)
           .map((c) => ({ id: c.id, name: c.name, type: c.type }));
         return JSON.stringify(connected.length > 0 ? connected : { message: 'No active connections. Please connect to a database first.' });
       }
 
       case 'list_databases': {
-        const conn = connections.find((c) => c.id === args.connection_id);
+        const conn = connections.find((c) => c.id === args.connection_id && !c.aiDisabled);
         if (!conn) return JSON.stringify({ error: `Connection '${args.connection_id}' not found` });
         const result = await invoke<{ name: string; tables: { name: string }[] }[]>('list_databases', {
           dbType: conn.type,
@@ -197,7 +198,7 @@ async function executeToolCall(
       }
 
       case 'list_tables': {
-        const conn = connections.find((c) => c.id === args.connection_id);
+        const conn = connections.find((c) => c.id === args.connection_id && !c.aiDisabled);
         if (!conn) return JSON.stringify({ error: `Connection '${args.connection_id}' not found` });
         // Try to get from cached databases first
         const dbInfo = conn.databases?.find((d) => d.name === args.database);
@@ -216,7 +217,7 @@ async function executeToolCall(
       }
 
       case 'describe_table': {
-        const conn = connections.find((c) => c.id === args.connection_id);
+        const conn = connections.find((c) => c.id === args.connection_id && !c.aiDisabled);
         if (!conn) return JSON.stringify({ error: `Connection '${args.connection_id}' not found` });
 
         if (conn.type === 'mongodb' || conn.type === 'mongodb_srv') {
@@ -259,7 +260,7 @@ async function executeToolCall(
       }
 
       case 'execute_query': {
-        const conn = connections.find((c) => c.id === args.connection_id);
+        const conn = connections.find((c) => c.id === args.connection_id && !c.aiDisabled);
         if (!conn) return JSON.stringify({ error: `Connection '${args.connection_id}' not found` });
 
         // Check if write operation
@@ -372,12 +373,27 @@ export async function chatStream(
     effectiveSignal = timeoutController.signal;
   }
 
-  const MAX_TOOL_ROUNDS = 10;
+  const MAX_TOOL_ROUNDS = 25;
   let round = 0;
+
+  const activeConns = connections.filter(c => c.isConnected && !c.aiDisabled);
+  const toolsSupported = activeConns.length > 0 && modelSupportsTools(settings.model);
+  console.log('[AI MCP] Active connections for tools:', activeConns.map(c => ({ id: c.id, name: c.name, type: c.type })));
+  console.log('[AI MCP] Model supports tools:', modelSupportsTools(settings.model), '| Tools will be provided:', toolsSupported);
 
   try {
     while (round < MAX_TOOL_ROUNDS) {
       round++;
+
+      const body = {
+        model: settings.model,
+        messages: chatMessages,
+        tools: toolsSupported ? MCP_TOOLS : undefined,
+        stream: true,
+        temperature: 0.7,
+        max_tokens: 4096,
+      };
+      console.log('[AI MCP] Request body (tools count):', body.tools ? body.tools.length : 0);
 
       const response = await fetch(url, {
         method: 'POST',
@@ -385,14 +401,7 @@ export async function chatStream(
           'Content-Type': 'application/json',
           Authorization: `Bearer ${settings.apiKey}`,
         },
-        body: JSON.stringify({
-          model: settings.model,
-          messages: chatMessages,
-          tools: connections.filter(c => c.isConnected).length > 0 ? MCP_TOOLS : undefined,
-          stream: true,
-          temperature: 0.7,
-          max_tokens: 4096,
-        }),
+        body: JSON.stringify(body),
         signal: effectiveSignal,
       });
 
@@ -472,10 +481,13 @@ export async function chatStream(
 
       // If no tool calls, we're done
       if (!hasToolCalls) {
+        console.log('[AI MCP] No tool calls in response, finish reason:', finishReason);
         callbacks.onComplete();
         clearTimeout(timeoutId);
         return;
       }
+
+      console.log('[AI MCP] Tool calls detected:', Array.from(toolCalls.values()).map(tc => tc.name));
 
       // Add assistant message with tool calls to history
       const assistantMsg: ChatMessage = {
@@ -490,7 +502,7 @@ export async function chatStream(
       chatMessages.push(assistantMsg);
 
       // Execute each tool call and add results
-      for (const tc of toolCalls.values()) {
+      for (const [idx, tc] of toolCalls.entries()) {
         let args: Record<string, string> = {};
         try {
           args = JSON.parse(tc.arguments);
@@ -498,9 +510,13 @@ export async function chatStream(
           args = {};
         }
 
-        callbacks.onToolCall?.(`Calling ${tc.name}...`);
+        callbacks.onToolCall?.({ id: tc.id || `tc_${Date.now()}_${idx}`, name: tc.name, args, status: 'calling' });
 
+        console.log('[AI MCP] Executing tool:', tc.name, 'args:', args);
         const result = await executeToolCall(tc.name, args, connections, callbacks.onWriteConfirm);
+        console.log('[AI MCP] Tool result:', result.slice(0, 200));
+
+        callbacks.onToolCall?.({ id: tc.id || `tc_${Date.now()}_${idx}`, name: tc.name, args, status: 'done' });
 
         chatMessages.push({
           role: 'tool',
@@ -509,7 +525,7 @@ export async function chatStream(
         });
       }
 
-      callbacks.onToolCall?.('');
+      callbacks.onToolCall?.({ id: '', name: '', args: {}, status: 'done' });
       // Continue loop to get AI's response after tool results
     }
 

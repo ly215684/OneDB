@@ -36,6 +36,7 @@ export interface Connection {
   updatedAt: number;
   isConnected?: boolean;
   databases?: DatabaseInfo[];
+  aiDisabled?: boolean;
 }
 
 export interface DatabaseInfo {

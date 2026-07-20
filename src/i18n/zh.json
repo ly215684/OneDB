@@ -125,7 +125,10 @@
     "enterDbName": "请输入数据库名称",
     "createDbFailed": "创建数据库失败",
     "sqliteNoCreateDb": "SQLite 基于文件存储，不支持新建数据库",
-    "redisNoCreateDb": "Redis 仅支持 db0-db15，不支持新建数据库"
+    "redisNoCreateDb": "Redis 仅支持 db0-db15，不支持新建数据库",
+    "disableAI": "禁用 AI 访问",
+    "enableAI": "启用 AI 访问",
+    "aiDisabledHint": "AI 已禁用，MCP 工具不会访问此连接"
   },
   "database": {
     "mysql": "MySQL",
@@ -164,10 +167,11 @@
     "success": "执行成功",
     "error": "执行失败",
     "noResults": "无查询结果",
+    "statementsExecuted": "条语句已执行",
     "copySql": "复制 SQL",
     "insertToEditor": "插入编辑器",
-    "mongoJsonFormat": "MongoDB 需要 JSON 格式查询。find: {\"collection\": \"users\", \"operation\": \"find\", \"filter\": {}, \"limit\": 100} | insertMany: {\"collection\": \"users\", \"operation\": \"insertMany\", \"documents\": [{\"name\": \"Alice\"}]}",
-        "mongoPlaceholder": "{\n  \"collection\": \"users\",\n  \"operation\": \"find\",\n  \"filter\": {},\n  \"limit\": 100\n}"
+    "mongoJsonFormat": "MongoDB 需要 JSON 格式查询（支持单个对象或数组）。find: {\"collection\": \"users\", \"operation\": \"find\", \"filter\": {}, \"limit\": 100} | 批量: [{...}, {...}]",
+        "mongoPlaceholder": "{\n  \"collection\": \"users\",\n  \"operation\": \"find\",\n  \"filter\": {},\n  \"limit\": 100\n}\n// 支持数组批量执行:\n// [{...}, {...}]"
   },
   "table": {
     "data": "数据",
@@ -264,9 +268,20 @@
     "confirmWriteMessage": "即将在 {{connection}} / {{database}} 执行以下操作：",
     "confirmExecute": "确认执行",
     "cancelExecute": "取消",
+    "sendToEditor": "发送到编辑器",
     "writeCancelled": "操作已取消",
     "schemaLoadFailed": "加载表结构失败",
-    "modelPlaceholder": "选择或输入模型名称"
+    "modelPlaceholder": "选择或输入模型名称",
+    "modelNoToolsWarning": "当前模型不支持工具调用，AI 无法自动探索数据库。请切换到支持 Function Calling 的模型。",
+    "showThinking": "显示思考过程",
+    "hideThinking": "隐藏思考过程",
+    "tool": {
+      "listConnections": "列出连接",
+      "listDatabases": "列出数据库",
+      "listTables": "列出表",
+      "describeTable": "描述表结构",
+      "executeQuery": "执行查询"
+    }
   },
   "settings": {
     "title": "设置",

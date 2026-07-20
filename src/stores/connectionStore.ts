@@ -18,6 +18,7 @@ interface ConnectionState {
   setDatabases: (id: string, databases: DatabaseInfo[]) => void;
   getConnection: (id: string) => Connection | undefined;
   getConnectionsByType: (type: DatabaseType) => Connection[];
+  toggleAIDisabled: (id: string) => void;
 }
 
 function generateId(): string {
@@ -158,6 +159,14 @@ export const useConnectionStore = create<ConnectionState>()(
       getConnection: (id) => get().connections.find((c) => c.id === id),
 
       getConnectionsByType: (type) => get().connections.filter((c) => c.type === type),
+
+      toggleAIDisabled: (id) => {
+        set((state) => ({
+          connections: state.connections.map((c) =>
+            c.id === id ? { ...c, aiDisabled: !c.aiDisabled, updatedAt: Date.now() } : c
+          ),
+        }));
+      },
     }),
     {
       name: 'onedb-connections',

@@ -9,14 +9,18 @@ import { CheckCircle, XCircle, Loader2, Table2, MessageSquare, BarChart3 } from 
 import { clsx } from 'clsx';
 
 interface ResultPanelProps {
-  result: QueryResult | null;
+  results: QueryResult[];
   isExecuting: boolean;
 }
 
-export function ResultPanel({ result, isExecuting }: ResultPanelProps) {
+export function ResultPanel({ results, isExecuting }: ResultPanelProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('results');
+  const [activeResultIdx, setActiveResultIdx] = useState(0);
   const dragScrollRef = useDragScroll();
+
+  // Reset active result index when results change
+  const safeIdx = Math.min(activeResultIdx, Math.max(0, results.length - 1));
 
   if (isExecuting) {
     return (
@@ -29,7 +33,7 @@ export function ResultPanel({ result, isExecuting }: ResultPanelProps) {
     );
   }
 
-  if (!result) {
+  if (results.length === 0) {
     return (
       <div className="h-full flex items-center justify-center">
         <p className="text-sm text-muted-foreground">{t('editor.noResults')}</p>
@@ -37,24 +41,77 @@ export function ResultPanel({ result, isExecuting }: ResultPanelProps) {
     );
   }
 
+  // Single result
+  if (results.length === 1) {
+    return (
+      <div className="h-full flex flex-col">
+        <SingleResultHeader result={results[0]} />
+        <Tabs
+          tabs={[
+            { id: 'results', label: t('editor.results'), icon: <Table2 size={12} /> },
+            { id: 'messages', label: t('editor.messages'), icon: <MessageSquare size={12} /> },
+            { id: 'plan', label: t('editor.executionPlan'), icon: <BarChart3 size={12} /> },
+          ]}
+          activeTab={activeTab}
+          onChange={setActiveTab}
+        />
+        <div ref={dragScrollRef} className="flex-1 min-h-0 overflow-auto cursor-grab">
+          {activeTab === 'results' && <ResultTable result={results[0]} />}
+          {activeTab === 'messages' && <MessagesTab result={results[0]} />}
+          {activeTab === 'plan' && <PlanTab />}
+        </div>
+      </div>
+    );
+  }
+
+  // Multiple results
+  const currentResult = results[safeIdx];
+  const successCount = results.filter(r => r.success).length;
+  const failCount = results.length - successCount;
+
   return (
     <div className="h-full flex flex-col">
-      {/* Execution Summary */}
-      <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border bg-toolbar">
-        {result.success ? (
-          <CheckCircle size={14} className="text-green-500" />
-        ) : (
-          <XCircle size={14} className="text-destructive" />
+      {/* Multi-result summary bar */}
+      <div className="flex items-center gap-2 px-3 py-1 border-b border-border bg-toolbar text-xs">
+        <span className="text-muted-foreground">{results.length} {t('editor.statementsExecuted')}</span>
+        <div className="w-px h-3 bg-border" />
+        {successCount > 0 && (
+          <span className="flex items-center gap-1 text-green-600">
+            <CheckCircle size={11} />{successCount}
+          </span>
         )}
-        <span className="text-xs text-muted-foreground">
-          {result.success ? t('editor.success') : t('editor.error')}
-        </span>
-        <Badge variant="info">{result.rowCount} {t('editor.rows')}</Badge>
-        {result.affectedRows !== undefined && (
-          <Badge variant="warning">{result.affectedRows} {t('editor.affected')}</Badge>
+        {failCount > 0 && (
+          <span className="flex items-center gap-1 text-destructive">
+            <XCircle size={11} />{failCount}
+          </span>
         )}
-        <Badge variant="default">{result.duration} {t('editor.ms')} {t('editor.duration')}</Badge>
       </div>
+
+      {/* Statement tabs */}
+      <div className="flex items-center gap-0 border-b border-border bg-toolbar overflow-x-auto">
+        {results.map((r, idx) => (
+          <button
+            key={idx}
+            onClick={() => setActiveResultIdx(idx)}
+            className={clsx(
+              'px-2.5 py-1 text-xs whitespace-nowrap border-r border-border/50 flex items-center gap-1.5 transition-colors',
+              safeIdx === idx
+                ? 'bg-background text-foreground font-medium'
+                : 'text-muted-foreground hover:bg-hover'
+            )}
+          >
+            {r.success
+              ? <CheckCircle size={10} className="text-green-500 flex-shrink-0" />
+              : <XCircle size={10} className="text-destructive flex-shrink-0" />
+            }
+            <span>#{idx + 1}</span>
+            <span className="text-2xs opacity-70">{r.duration}ms</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Current result summary */}
+      <SingleResultHeader result={currentResult} />
 
       {/* Tabs */}
       <Tabs
@@ -67,22 +124,51 @@ export function ResultPanel({ result, isExecuting }: ResultPanelProps) {
         onChange={setActiveTab}
       />
 
-      {/* Tab Content */}
+      {/* Tab content */}
       <div ref={dragScrollRef} className="flex-1 min-h-0 overflow-auto cursor-grab">
-        {activeTab === 'results' && <ResultTable result={result} />}
-        {activeTab === 'messages' && (
-          <div className="p-3">
-            <pre className="text-xs font-mono text-foreground whitespace-pre-wrap">
-              {result.success ? 'Query executed successfully.' : result.error}
-            </pre>
-          </div>
-        )}
-        {activeTab === 'plan' && (
-          <div className="p-3">
-            <p className="text-xs text-muted-foreground">Execution plan not available for mock queries.</p>
-          </div>
-        )}
+        {activeTab === 'results' && <ResultTable result={currentResult} />}
+        {activeTab === 'messages' && <MessagesTab result={currentResult} />}
+        {activeTab === 'plan' && <PlanTab />}
       </div>
+    </div>
+  );
+}
+
+function SingleResultHeader({ result }: { result: QueryResult }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border bg-toolbar">
+      {result.success ? (
+        <CheckCircle size={14} className="text-green-500" />
+      ) : (
+        <XCircle size={14} className="text-destructive" />
+      )}
+      <span className="text-xs text-muted-foreground">
+        {result.success ? t('editor.success') : t('editor.error')}
+      </span>
+      <Badge variant="info">{result.rowCount} {t('editor.rows')}</Badge>
+      {result.affectedRows !== undefined && (
+        <Badge variant="warning">{result.affectedRows} {t('editor.affected')}</Badge>
+      )}
+      <Badge variant="default">{result.duration} {t('editor.ms')} {t('editor.duration')}</Badge>
+    </div>
+  );
+}
+
+function MessagesTab({ result }: { result: QueryResult }) {
+  return (
+    <div className="p-3">
+      <pre className="text-xs font-mono text-foreground whitespace-pre-wrap">
+        {result.success ? 'Query executed successfully.' : result.error}
+      </pre>
+    </div>
+  );
+}
+
+function PlanTab() {
+  return (
+    <div className="p-3">
+      <p className="text-xs text-muted-foreground">Execution plan not available for mock queries.</p>
     </div>
   );
 }
