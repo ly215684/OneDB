@@ -5,7 +5,7 @@
 </p>
 
 An all-in-one database management desktop application built with **Tauri 2 + React 19 + TypeScript**.  
-Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities for SQL editing, data browsing, schema management, and import/export.
+Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities for SQL editing, data browsing, schema management, AI assistance, and import/export.
 
 ---
 
@@ -17,22 +17,28 @@ Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities fo
 |----------|---------|----------|-----------|------------|---------------|
 | MySQL | ✅ | ✅ | ✅ | ✅ | ✅ |
 | PostgreSQL | ✅ | ✅ | ✅ | ✅ | ✅ |
-| MongoDB | ✅ | ✅ | ✅ (Collections) | ✅ | ✅ |
+| MongoDB | ✅ | ✅ | ✅ (JSON / Array batch) | ✅ | ✅ |
 | SQLite | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Redis | ✅ | ✅ | ✅ (Commands) | — | ✅ |
 
 ### Core Features
 
-- **SQL Editor** — CodeMirror-based with syntax highlighting, auto-completion, and shortcut execution
+- **SQL Editor** — CodeMirror-based with syntax highlighting, auto-completion, shortcut execution, and **multi-statement batch execution** (smart semicolon splitting)
 - **Data Table View** — Virtual scrolling for large datasets with pagination, sorting, and filtering
 - **ER Diagram** — Visualize table structures and foreign key relationships
 - **Schema Editor** — Add/remove/modify columns, manage primary keys, indexes, and foreign keys
 - **MongoDB Document Browser** — View and edit JSON documents directly
+- **AI Assistant Panel** — Integrated AI chat with:
+  - Streaming responses with thinking process display
+  - MCP tool calling (list connections/databases/tables, describe schema, execute queries)
+  - Write operation confirmation (INSERT/UPDATE/DELETE require manual approval)
+  - One-click send SQL to editor
+  - Multi-provider presets (OpenAI / ZhipuAI) + custom API endpoints
 - **Context Menus** — Three-level right-click menus for connections, databases, and tables — create, drop, truncate, import/export
-- **Import/Export** — JSON / CSV formats, batch operations by table or database
+- **Import/Export** — JSON / CSV / SQL INSERT formats, batch operations by table or database
 - **Global Search** — `Ctrl+K` to quickly search connections, databases, and tables
-- **AI Panel** — Integrated AI-assisted SQL generation and analysis (interface reserved)
 - **Query History** — Records all executed SQL statements
+- **Auto Update** — Built-in version checking with incremental updates, one-click download and install
 - **Secure Storage** — AES-256-GCM encrypted connection passwords, master password lock protection, custom data storage path support
 
 ### UI & Experience
@@ -42,22 +48,24 @@ Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities fo
 - **Custom Dialogs** — Unified styled native dialogs replacing browser `alert/confirm/prompt`
 - **Connection Grouping** — Grouped by database type with brand-color badges
 - **Keyboard Shortcuts** — Comprehensive shortcut support
-- **Responsive Layout** — Draggable sidebar width, adaptive window sizing
+- **Responsive Layout** — Draggable sidebar and AI panel width, adaptive window sizing
 
 ---
 
 ## Tech Stack
 
 | Layer | Technology | Version |
-|-------|-----------|---------|
+|-------|-----------|--------|
 | Desktop Framework | [Tauri](https://tauri.app/) | 2.x |
 | Frontend Framework | [React](https://react.dev/) | 19.x |
 | Type System | [TypeScript](https://www.typescriptlang.org/) | 5.8 |
 | Styling | [Tailwind CSS](https://tailwindcss.com/) | 3.4 |
 | State Management | [Zustand](https://zustand.docs.pmnd.rs/) | 5.x |
 | Editor | [CodeMirror](https://codemirror.net/) | 6.x |
+| AI Rendering | [react-markdown](https://github.com/remarkjs/react-markdown) | — |
 | Icons | [Lucide](https://lucide.dev/) | — |
 | i18n | [i18next](https://www.i18next.com/) | — |
+| Auto Update | [tauri-plugin-updater](https://github.com/tauri-apps/plugins-workspace) | — |
 
 ### Backend Drivers (Rust)
 
@@ -91,16 +99,17 @@ OneDB/
 │   │   ├── structure/            # Table structure editor
 │   │   ├── table/                # Data table view
 │   │   └── ui/                   # Shared UI components
-│   ├── hooks/                    # Custom React hooks
+│   ├── hooks/                    # Custom hooks (shortcuts/drag-scroll/update checker)
 │   ├── i18n/                     # Translation files (en/zh)
-│   ├── layouts/                  # Layout components (sidebar/toolbar/workspace)
+│   ├── layouts/                  # Layout components (sidebar/toolbar/workspace/AI panel)
 │   ├── services/
-│   │   └── cryptoService.ts      # Crypto service (AES-256-GCM)
-│   ├── stores/
-│   │   ├── tauriStorage.ts       # Tauri Store adapter
-│   │   ├── connectionStore.ts    # Connection state management
-│   │   └── settingsStore.ts      # Settings state management
-│   └── types/                    # TypeScript type definitions
+│   │   ├── aiService.ts          # AI chat service (streaming/MCP tool calls)
+│   │   ├── cryptoService.ts      # Crypto service (AES-256-GCM)
+│   │   ├── exportService.ts      # Data export (CSV/JSON/SQL)
+│   │   └── importService.ts      # Data import
+│   ├── stores/                   # Zustand state management
+│   ├── types/                    # TypeScript type definitions
+│   └── utils/                    # Utilities (SQL splitter, etc.)
 ├── src-tauri/                    # Rust backend
 │   ├── icons/                    # Application icons
 │   └── src/
@@ -144,15 +153,17 @@ npm run tauri build
 1. **Add Connection** — Click the `+` button in the sidebar, select a database type, and fill in connection details
 2. **Connect** — Double-click a connection to establish it; databases are loaded automatically
 3. **Browse Data** — Expand Database → Tables, double-click a table to open the data view
-4. **Run SQL** — Double-click a database to open the SQL editor, write queries and execute
-5. **Manage** — Right-click on connections/databases/tables to create, drop, import, export, and more
-6. **Security** — Configure a master password in settings; connection passwords are automatically encrypted
+4. **Run SQL** — Double-click a database to open the SQL editor; supports multi-statement (semicolon-separated) batch execution
+5. **MongoDB Queries** — Use JSON format, supports single object or array batch operations
+6. **AI Assistant** — Open the AI panel, describe your needs in natural language, and AI generates & executes SQL automatically
+7. **Manage** — Right-click on connections/databases/tables to create, drop, import, export, and more
+8. **Security** — Configure a master password in settings; connection passwords are automatically encrypted
 
 ---
 
 ## Version
 
-v0.1.4
+v0.1.6
 
 ---
 
