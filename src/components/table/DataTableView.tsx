@@ -44,6 +44,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duration, setDuration] = useState(0);
+  const [totalRows, setTotalRows] = useState(0);
 
   // Filtering
   const [filterText, setFilterText] = useState('');
@@ -69,19 +70,33 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
     setError(null);
     try {
       let query: string;
+      let countQuery: string;
       if (isNoSql) {
-        query = JSON.stringify({ collection: tableName, filter: {} });
+        query = JSON.stringify({ collection: tableName, operation: 'find', filter: {}, limit: pageSize, skip: (currentPage - 1) * pageSize });
+        countQuery = JSON.stringify({ collection: tableName, operation: 'count', filter: {} });
       } else {
         const parts = [`SELECT * FROM ${tableName}`];
         if (sortCol) parts.push(`ORDER BY ${sortCol} ${sortDir.toUpperCase()}`);
         parts.push(`LIMIT ${pageSize} OFFSET ${(currentPage - 1) * pageSize}`);
         query = parts.join(' ');
+        countQuery = `SELECT COUNT(*) as cnt FROM ${tableName}`;
       }
-      const result = await executeQuery(conn.type, conn.config, query, database);
+      const [result, countResult] = await Promise.all([
+        executeQuery(conn.type, conn.config, query, database),
+        executeQuery(conn.type, conn.config, countQuery, database),
+      ]);
       if (result.success) {
         setColumns(result.columns);
         setRows(result.rows);
         setDuration(result.duration);
+        // Parse total count
+        if (countResult.success && countResult.rows.length > 0) {
+          const row = countResult.rows[0];
+          const cnt = isNoSql ? (row['count'] as number) : (row['cnt'] ?? row['COUNT(*)'] ?? Object.values(row)[0]) as number;
+          setTotalRows(Number(cnt) || 0);
+        } else {
+          setTotalRows(result.rows.length);
+        }
       } else {
         setError(result.error || 'Query failed');
       }
@@ -96,7 +111,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
     fetchData();
   }, [fetchData]);
 
-  // Client-side filtering
+  // Client-side filtering (on current page data only)
   const filteredRows = rows.filter((row) => {
     if (!filterText) return true;
     const lower = filterText.toLowerCase();
@@ -106,8 +121,8 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
     });
   });
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-  const pagedRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const pagedRows = filteredRows;
 
   const handleSort = (col: string) => {
     if (sortCol === col) {
@@ -135,21 +150,43 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   const commitEdit = () => {
     if (!editingCell) return;
     const { row, col } = editingCell;
-    const actualIdx = (currentPage - 1) * pageSize + row;
     setRows((prev) => {
       const next = [...prev];
-      if (next[actualIdx]) next[actualIdx] = { ...next[actualIdx], [col]: editValue };
+      if (next[row]) next[row] = { ...next[row], [col]: editValue };
       return next;
     });
     setEditingCell(null);
   };
 
-  const handleExport = (format: 'csv' | 'json' | 'sql-insert') => {
-    exportToFile(
-      { columns, rows: filteredRows, rowCount: filteredRows.length, duration: 0, success: true },
-      format,
-      tableName,
-    );
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async (format: 'csv' | 'json' | 'sql-insert', scope: 'all' | 'page') => {
+    if (scope === 'page') {
+      exportToFile(
+        { columns, rows: filteredRows, rowCount: filteredRows.length, duration: 0, success: true },
+        format,
+        tableName,
+      );
+      return;
+    }
+    // Export all: fetch full data without LIMIT
+    if (!conn) return;
+    setExporting(true);
+    try {
+      const query = isNoSql
+        ? JSON.stringify({ collection: tableName, operation: 'find', filter: {}, limit: 0, skip: 0 })
+        : `SELECT * FROM ${tableName}`;
+      const result = await executeQuery(conn.type, conn.config, query, database);
+      if (result.success) {
+        exportToFile(
+          { columns: result.columns, rows: result.rows, rowCount: result.rows.length, duration: 0, success: true },
+          format,
+          tableName,
+        );
+      }
+    } finally {
+      setExporting(false);
+    }
   };
 
   if (error) {
@@ -187,14 +224,18 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
         <div className="flex-1" />
         <DropdownMenu
           items={[
-            { label: t('table.exportCsv'), onClick: () => handleExport('csv') },
-            { label: t('table.exportJson'), onClick: () => handleExport('json') },
-            { label: t('table.exportSql'), onClick: () => handleExport('sql-insert') },
+            { label: t('table.exportAllCsv'), onClick: () => handleExport('csv', 'all') },
+            { label: t('table.exportAllJson'), onClick: () => handleExport('json', 'all') },
+            { label: t('table.exportAllSql'), onClick: () => handleExport('sql-insert', 'all') },
+            { separator: true, label: '' },
+            { label: t('table.exportPageCsv'), onClick: () => handleExport('csv', 'page') },
+            { label: t('table.exportPageJson'), onClick: () => handleExport('json', 'page') },
+            { label: t('table.exportPageSql'), onClick: () => handleExport('sql-insert', 'page') },
           ]}
-          trigger={<Button variant="ghost" size="icon" className="h-7 w-7"><ArrowDownToLine size={14} /></Button>}
+          trigger={<Button variant="ghost" size="icon" className="h-7 w-7" disabled={exporting}><ArrowDownToLine size={14} className={exporting ? 'animate-pulse' : ''} /></Button>}
         />
         <span className="text-2xs text-muted-foreground">
-          {filteredRows.length} {t('table.rows')} · {duration} {t('editor.ms')}
+          {totalRows} {t('table.rows')} · {duration} {t('editor.ms')}
         </span>
       </div>
 

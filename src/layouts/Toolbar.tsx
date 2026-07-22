@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useThemeStore } from '../stores/themeStore';
 import { useTabStore } from '../stores/tabStore';
 import { useAIStore } from '../stores/aiStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { ConnectionDialog } from '../components/connection/ConnectionDialog';
 import { SettingsDialog } from '../components/settings/SettingsDialog';
 import { GlobalSearch } from '../components/ui/GlobalSearch';
@@ -39,6 +40,7 @@ export function Toolbar({ onToggleSidebar, sidebarCollapsed }: ToolbarProps) {
   const addTab = useTabStore((s) => s.addTab);
   const aiVisible = useAIStore((s) => s.isVisible);
   const toggleAI = useAIStore((s) => s.toggleVisible);
+  const aiEnabled = useSettingsStore((s) => s.ai.enabled);
   const [connDialogOpen, setConnDialogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -163,17 +165,21 @@ export function Toolbar({ onToggleSidebar, sidebarCollapsed }: ToolbarProps) {
           <IconButton icon={Settings} size={16} onClick={() => setSettingsOpen(true)} label={t('toolbar.settings')} />
         </HoverTooltip>
 
-        <div className="w-px h-5 bg-border mx-0.5" />
+        {aiEnabled && (
+          <>
+            <div className="w-px h-5 bg-border mx-0.5" />
 
-        <HoverTooltip content={aiVisible ? t('toolbar.hideAI') : t('toolbar.showAI')} position="bottom">
-          <IconButton
-            icon={Bot}
-            size={16}
-            variant={aiVisible ? 'active' : 'ghost'}
-            onClick={toggleAI}
-            label={t('toolbar.ai')}
-          />
-        </HoverTooltip>
+            <HoverTooltip content={aiVisible ? t('toolbar.hideAI') : t('toolbar.showAI')} position="bottom">
+              <IconButton
+                icon={Bot}
+                size={16}
+                variant={aiVisible ? 'active' : 'ghost'}
+                onClick={toggleAI}
+                label={t('toolbar.ai')}
+              />
+            </HoverTooltip>
+          </>
+        )}
       </div>
 
       {/* Connection Dialog */}

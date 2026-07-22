@@ -4,12 +4,14 @@ import { Sidebar } from './Sidebar';
 import { Workspace } from './Workspace';
 import { AIPanel } from './AIPanel';
 import { useAIStore } from '../stores/aiStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { useShortcuts } from '../hooks/useShortcuts';
 
 export function MainLayout() {
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const aiVisible = useAIStore((s) => s.isVisible);
+  const aiEnabled = useSettingsStore((s) => s.ai.enabled);
 
   // Register global shortcuts
   useShortcuts();
@@ -59,7 +61,7 @@ export function MainLayout() {
         </div>
 
         {/* Right AI Panel */}
-        {aiVisible && (
+        {aiEnabled && aiVisible && (
           <>
             <div className="w-px bg-border flex-shrink-0" />
             <AIPanel />
