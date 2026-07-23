@@ -4,8 +4,12 @@
   <img src="src-tauri/icons/128x128.png" alt="OneDB Logo" />
 </p>
 
+<p align="center">
+  <a href="README.md">中文</a> | <a href="README.en.md">English</a>
+</p>
+
 一体化数据库管理桌面工具，基于 **Tauri 2 + React 19 + TypeScript** 构建。  
-支持 MySQL、PostgreSQL、MongoDB、SQLite、Redis 五种主流数据库，提供 SQL 编辑、数据浏览、结构管理、AI 辅助、导入导出等完整功能。
+支持 MySQL、PostgreSQL、MongoDB、SQLite、Redis、MariaDB、DuckDB 七种主流数据库，提供 SQL 编辑、数据浏览、结构管理、AI 辅助、导入导出等完整功能。
 
 ---
 
@@ -20,11 +24,13 @@
 | MongoDB | ✅ | ✅ | ✅（JSON 查询 / 数组批量） | ✅ | ✅ |
 | SQLite | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Redis | ✅ | ✅ | ✅（命令） | — | ✅ |
+| MariaDB | ✅ | ✅ | ✅ | ✅ | ✅ |
+| DuckDB | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ### 核心功能
 
 - **SQL 编辑器** — 基于 CodeMirror，支持语法高亮、自动补全、快捷键执行、**多语句批量执行**（分号智能拆分）
-- **数据表视图** — 虚拟滚动大数据量展示，分页/排序/筛选
+- **数据表视图** — 虚拟滚动大数据量展示，分页/排序/筛选，支持全量导出
 - **ER 关系图** — 可视化表结构与外键关系
 - **表结构编辑器** — 字段增删改、主键/索引/外键管理
 - **MongoDB 文档浏览器** — JSON 文档直接查看与编辑
@@ -47,7 +53,7 @@
 - **国际化** — 中文 / 英文双语，一键切换
 - **自定义弹窗** — 统一风格的原生弹窗，替代浏览器 `alert/confirm/prompt`
 - **连接分组** — 按数据库类型分组显示，品牌色标识
-- **快捷键** — 完整的键盘快捷键支持
+- **快捷键** — 完整的键盘快捷键支持，支持自定义配置
 - **响应式布局** — 侧边栏可拖拽调整宽度，AI 面板可拖拽调整宽度，窗口自适应
 
 ---
@@ -76,6 +82,8 @@
 | MongoDB | `mongodb` |
 | SQLite | `rusqlite`（bundled） |
 | Redis | `redis`（tokio） |
+| MariaDB | `mysql_async` |
+| DuckDB | `duckdb`（bundled） |
 
 ### 安全存储
 
@@ -163,7 +171,7 @@ npm run tauri build
 
 ## 版本
 
-v0.2.0
+v0.2.1
 
 ---
 

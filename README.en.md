@@ -4,8 +4,12 @@
   <img src="src-tauri/icons/128x128.png" alt="OneDB Logo" />
 </p>
 
+<p align="center">
+  <a href="README.md">中文</a> | <a href="README.en.md">English</a>
+</p>
+
 An all-in-one database management desktop application built with **Tauri 2 + React 19 + TypeScript**.  
-Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities for SQL editing, data browsing, schema management, AI assistance, and import/export.
+Supports MySQL, PostgreSQL, MongoDB, SQLite, Redis, MariaDB, and DuckDB with full capabilities for SQL editing, data browsing, schema management, AI assistance, and import/export.
 
 ---
 
@@ -20,11 +24,13 @@ Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities fo
 | MongoDB | ✅ | ✅ | ✅ (JSON / Array batch) | ✅ | ✅ |
 | SQLite | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Redis | ✅ | ✅ | ✅ (Commands) | — | ✅ |
+| MariaDB | ✅ | ✅ | ✅ | ✅ | ✅ |
+| DuckDB | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ### Core Features
 
 - **SQL Editor** — CodeMirror-based with syntax highlighting, auto-completion, shortcut execution, and **multi-statement batch execution** (smart semicolon splitting)
-- **Data Table View** — Virtual scrolling for large datasets with pagination, sorting, and filtering
+- **Data Table View** — Virtual scrolling for large datasets with pagination, sorting, and filtering, with full export support
 - **ER Diagram** — Visualize table structures and foreign key relationships
 - **Schema Editor** — Add/remove/modify columns, manage primary keys, indexes, and foreign keys
 - **MongoDB Document Browser** — View and edit JSON documents directly
@@ -47,7 +53,7 @@ Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities fo
 - **Internationalization** — Chinese / English bilingual, one-click switch
 - **Custom Dialogs** — Unified styled native dialogs replacing browser `alert/confirm/prompt`
 - **Connection Grouping** — Grouped by database type with brand-color badges
-- **Keyboard Shortcuts** — Comprehensive shortcut support
+- **Keyboard Shortcuts** — Comprehensive shortcut support with custom configuration
 - **Responsive Layout** — Draggable sidebar and AI panel width, adaptive window sizing
 
 ---
@@ -76,6 +82,8 @@ Supports MySQL, PostgreSQL, MongoDB, SQLite, and Redis with full capabilities fo
 | MongoDB | `mongodb` |
 | SQLite | `rusqlite` (bundled) |
 | Redis | `redis` (tokio) |
+| MariaDB | `mysql_async` |
+| DuckDB | `duckdb` (bundled) |
 
 ### Secure Storage
 
@@ -163,7 +171,7 @@ npm run tauri build
 
 ## Version
 
-v0.2.0
+v0.2.1
 
 ---
 
