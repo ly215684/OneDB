@@ -21,8 +21,10 @@ interface DriverInfo {
 
 const MOCK_DRIVERS: DriverInfo[] = [
   { name: 'MySQL Connector', type: 'mysql', version: '8.0.33', status: 'installed', icon: '🐬' },
+  { name: 'MariaDB Connector', type: 'mariadb', version: '3.1.1', status: 'installed', icon: '🦭' },
   { name: 'PostgreSQL JDBC', type: 'postgresql', version: '42.6.0', status: 'installed', icon: '🐘' },
   { name: 'SQLite Driver', type: 'sqlite', version: '3.42.0', status: 'installed', icon: '🗄️' },
+  { name: 'DuckDB Driver', type: 'duckdb', version: '1.0.0', status: 'installed', icon: '🦆' },
   { name: 'MongoDB Node Driver', type: 'mongodb', version: '5.7.0', status: 'installed', icon: '🍃' },
   { name: 'Redis Client', type: 'redis', version: '4.6.7', status: 'installed', icon: '🔴' },
 ];

@@ -1,4 +1,4 @@
-export type DatabaseType = 'mysql' | 'postgresql' | 'sqlite' | 'mongodb' | 'mongodb_srv' | 'redis';
+export type DatabaseType = 'mysql' | 'mariadb' | 'postgresql' | 'sqlite' | 'duckdb' | 'mongodb' | 'mongodb_srv' | 'redis';
 
 export interface ConnectionConfig {
   host?: string;
@@ -149,8 +149,10 @@ export const COLOR_OPTIONS = [
 
 export const DEFAULT_PORTS: Record<DatabaseType, number> = {
   mysql: 3306,
+  mariadb: 3306,
   postgresql: 5432,
   sqlite: 0,
+  duckdb: 0,
   mongodb: 27017,
   mongodb_srv: 0,
   redis: 6379,
@@ -158,9 +160,11 @@ export const DEFAULT_PORTS: Record<DatabaseType, number> = {
 
 export const DATABASE_TYPES: { type: DatabaseType; name: string; icon: string; description: string }[] = [
   { type: 'mysql', name: 'MySQL', icon: '🐬', description: 'database.mysqlDesc' },
+  { type: 'mariadb', name: 'MariaDB', icon: '🦭', description: 'database.mariadbDesc' },
   { type: 'postgresql', name: 'PostgreSQL', icon: '🐘', description: 'database.postgresqlDesc' },
   { type: 'mongodb', name: 'MongoDB', icon: '🍃', description: 'database.mongodbDesc' },
   { type: 'mongodb_srv', name: 'MongoDB SRV', icon: '🍃', description: 'database.mongodbSrvDesc' },
   { type: 'sqlite', name: 'SQLite', icon: '🗄️', description: 'database.sqliteDesc' },
+  { type: 'duckdb', name: 'DuckDB', icon: '🦆', description: 'database.duckdbDesc' },
   { type: 'redis', name: 'Redis', icon: '🔴', description: 'database.redisDesc' },
 ];

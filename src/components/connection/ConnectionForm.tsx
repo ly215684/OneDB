@@ -87,6 +87,7 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
   const renderFormFields = () => {
     switch (type) {
       case 'mysql':
+      case 'mariadb':
       case 'postgresql':
         return (
           <>
@@ -107,10 +108,11 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
           </>
         );
       case 'sqlite':
+      case 'duckdb':
         return (
           <div className="flex gap-2">
             <div className="flex-1">
-              <Input label={t('connection.filePath')} value={config.filePath || ''} onChange={(e) => updateConfig('filePath', e.target.value)} placeholder="/path/to/database.db" />
+              <Input label={t('connection.filePath')} value={config.filePath || ''} onChange={(e) => updateConfig('filePath', e.target.value)} placeholder={type === 'duckdb' ? '/path/to/database.duckdb' : '/path/to/database.db'} />
             </div>
             <Button variant="outline" size="sm" className="mt-6">
               {t('connection.browse')}
@@ -218,7 +220,7 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
         )}
 
         {/* SSL / SSH options */}
-        {(type !== 'sqlite') && (
+        {(type !== 'sqlite' && type !== 'duckdb') && (
           <div className="flex gap-4 pt-2">
             <label className="flex items-center gap-2 text-xs cursor-pointer">
               <input

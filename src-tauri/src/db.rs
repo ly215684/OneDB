@@ -95,9 +95,10 @@ pub async fn test_connection_impl(
     config: serde_json::Value,
 ) -> Result<String, String> {
     match db_type {
-        "mysql" => test_mysql(&config).await,
+        "mysql" | "mariadb" => test_mysql(&config).await,
         "postgresql" => test_postgresql(&config).await,
         "sqlite" => test_sqlite(&config).await,
+        "duckdb" => test_duckdb(&config).await,
         "mongodb" | "mongodb_srv" => test_mongodb(db_type, &config).await,
         "redis" => test_redis(&config).await,
         _ => Err(format!("Unsupported database type: {}", db_type)),
@@ -111,9 +112,10 @@ pub async fn list_databases_impl(
     config: serde_json::Value,
 ) -> Result<Vec<DatabaseResult>, String> {
     match db_type {
-        "mysql" => list_mysql(&config).await,
+        "mysql" | "mariadb" => list_mysql(&config).await,
         "postgresql" => list_postgresql(&config).await,
         "sqlite" => list_sqlite(&config).await,
+        "duckdb" => list_duckdb(&config).await,
         "mongodb" | "mongodb_srv" => list_mongodb(db_type, &config).await,
         "redis" => list_redis(&config).await,
         _ => Err(format!("Unsupported database type: {}", db_type)),
@@ -549,9 +551,10 @@ pub async fn execute_query_impl(
     database: Option<String>,
 ) -> Result<QueryResultData, String> {
     match db_type {
-        "mysql" => exec_query_mysql(&config, &query, database.as_deref()).await,
+        "mysql" | "mariadb" => exec_query_mysql(&config, &query, database.as_deref()).await,
         "postgresql" => exec_query_postgresql(&config, &query, database.as_deref()).await,
         "sqlite" => exec_query_sqlite(&config, &query).await,
+        "duckdb" => exec_query_duckdb(&config, &query).await,
         "mongodb" | "mongodb_srv" => exec_query_mongodb(db_type, &config, &query, database.as_deref()).await,
         "redis" => exec_query_redis(&config, &query).await,
         _ => Err(format!("Unsupported database type: {}", db_type)),
@@ -1187,9 +1190,10 @@ pub async fn get_table_structure_impl(
     table: &str,
 ) -> Result<TableStructureData, String> {
     match db_type {
-        "mysql" => get_structure_mysql(&config, database, table).await,
+        "mysql" | "mariadb" => get_structure_mysql(&config, database, table).await,
         "postgresql" => get_structure_postgresql(&config, database, table).await,
         "sqlite" => get_structure_sqlite(&config, table).await,
+        "duckdb" => get_structure_duckdb(&config, table).await,
         _ => Err(format!("Table structure not supported for: {}", db_type)),
     }
 }
@@ -1498,9 +1502,10 @@ pub async fn get_er_data_impl(
     database: &str,
 ) -> Result<ERDiagramData, String> {
     match db_type {
-        "mysql" => get_er_mysql(&config, database).await,
+        "mysql" | "mariadb" => get_er_mysql(&config, database).await,
         "postgresql" => get_er_postgresql(&config, database).await,
         "sqlite" => get_er_sqlite(&config).await,
+        "duckdb" => get_er_duckdb(&config).await,
         _ => Err(format!("ER diagram not supported for: {}", db_type)),
     }
 }
@@ -1697,6 +1702,283 @@ async fn get_er_sqlite(config: &serde_json::Value) -> Result<ERDiagramData, Stri
         }
 
         Ok(ERDiagramData { tables, relations })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(result)
+}
+
+// ─── DuckDB ───────────────────────────────────────────────────────
+
+async fn test_duckdb(config: &serde_json::Value) -> Result<String, String> {
+    let path = config["filePath"]
+        .as_str()
+        .ok_or("File path is required")?
+        .to_string();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let conn = duckdb::Connection::open(&path).map_err(|e| e.to_string())?;
+        let version: String = conn
+            .query_row("SELECT version()", [], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+        Ok(version)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(format!("DuckDB {}", result))
+}
+
+async fn list_duckdb(config: &serde_json::Value) -> Result<Vec<DatabaseResult>, String> {
+    let path = config["filePath"]
+        .as_str()
+        .ok_or("File path is required")?
+        .to_string();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<Vec<DatabaseResult>, String> {
+        let conn = duckdb::Connection::open(&path).map_err(|e| e.to_string())?;
+
+        let mut tables = Vec::new();
+        let mut stmt = conn
+            .prepare(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+
+        for row in rows {
+            if let Ok(name) = row {
+                tables.push(TableResult { name });
+            }
+        }
+
+        Ok(vec![DatabaseResult {
+            name: "main".to_string(),
+            tables,
+        }])
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(result)
+}
+
+async fn exec_query_duckdb(
+    config: &serde_json::Value,
+    query: &str,
+) -> Result<QueryResultData, String> {
+    let path = config["filePath"]
+        .as_str()
+        .ok_or("File path is required")?
+        .to_string();
+    let query = query.to_string();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<QueryResultData, String> {
+        let conn = duckdb::Connection::open(&path).map_err(|e| e.to_string())?;
+        let start = std::time::Instant::now();
+
+        let query_lower = query.trim().to_lowercase();
+        if query_lower.starts_with("select") || query_lower.starts_with("with") || query_lower.starts_with("show") || query_lower.starts_with("describe") || query_lower.starts_with("pragma") {
+            let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+            let columns: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+            let column_count = columns.len();
+
+            let rows_iter = stmt.query_map([], |row| {
+                let mut map = serde_json::Map::new();
+                for i in 0..column_count {
+                    let val: duckdb::types::Value = row.get(i)?;
+                    let json_val = match val {
+                        duckdb::types::Value::Null => serde_json::Value::Null,
+                        duckdb::types::Value::Boolean(b) => serde_json::Value::Bool(b),
+                        duckdb::types::Value::TinyInt(i) => serde_json::Value::Number(i.into()),
+                        duckdb::types::Value::SmallInt(i) => serde_json::Value::Number(i.into()),
+                        duckdb::types::Value::Int(i) => serde_json::Value::Number(i.into()),
+                        duckdb::types::Value::BigInt(i) => serde_json::Value::Number(i.into()),
+                        duckdb::types::Value::UTinyInt(i) => serde_json::Value::Number(i.into()),
+                        duckdb::types::Value::USmallInt(i) => serde_json::Value::Number(i.into()),
+                        duckdb::types::Value::UInt(i) => serde_json::Value::Number(i.into()),
+                        duckdb::types::Value::UBigInt(i) => serde_json::Value::Number(i.into()),
+                        duckdb::types::Value::Float(f) => serde_json::Number::from_f64(f as f64)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::Null),
+                        duckdb::types::Value::Double(f) => serde_json::Number::from_f64(f)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::Null),
+                        duckdb::types::Value::Text(s) => serde_json::Value::String(s),
+                        duckdb::types::Value::Blob(b) => serde_json::Value::String(format!("<blob {}B>", b.len())),
+                        _ => serde_json::Value::String(format!("{:?}", val)),
+                    };
+                    map.insert(columns[i].clone(), json_val);
+                }
+                Ok(serde_json::Value::Object(map))
+            }).map_err(|e| e.to_string())?;
+
+            let mut rows = Vec::new();
+            for row in rows_iter {
+                if let Ok(r) = row {
+                    rows.push(r);
+                }
+            }
+
+            let duration = start.elapsed().as_millis() as u64;
+            Ok(QueryResultData {
+                row_count: rows.len(),
+                affected_rows: 0,
+                duration,
+                success: true,
+                error: None,
+                columns,
+                rows,
+            })
+        } else {
+            let affected = conn.execute(&query, []).map_err(|e| e.to_string())?;
+            let duration = start.elapsed().as_millis() as u64;
+            Ok(QueryResultData {
+                columns: vec![],
+                rows: vec![],
+                row_count: 0,
+                affected_rows: affected as u64,
+                duration,
+                success: true,
+                error: None,
+            })
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(result)
+}
+
+async fn get_structure_duckdb(
+    config: &serde_json::Value,
+    table: &str,
+) -> Result<TableStructureData, String> {
+    let path = config["filePath"].as_str().ok_or("File path is required")?.to_string();
+    let table = table.to_string();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<TableStructureData, String> {
+        let conn = duckdb::Connection::open(&path).map_err(|e| e.to_string())?;
+
+        // Columns via information_schema
+        let mut col_stmt = conn.prepare(
+            "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = ? AND table_schema = 'main' ORDER BY ordinal_position"
+        ).map_err(|e| e.to_string())?;
+        let col_rows = col_stmt.query_map([&table], |row| {
+            Ok((
+                row.get::<_, String>(0)?, // column_name
+                row.get::<_, String>(1)?, // data_type
+                row.get::<_, String>(2)?, // is_nullable
+                row.get::<_, Option<String>>(3)?, // column_default
+            ))
+        }).map_err(|e| e.to_string())?;
+
+        let mut columns = Vec::new();
+        for row in col_rows {
+            if let Ok((name, col_type, nullable, default_val)) = row {
+                columns.push(ColumnData {
+                    name,
+                    r#type: col_type,
+                    length: None,
+                    default_value: default_val,
+                    nullable: nullable == "YES",
+                    primary_key: false,
+                    auto_increment: false,
+                    comment: String::new(),
+                });
+            }
+        }
+
+        // Try to detect primary keys via PRAGMA
+        let safe_table = table.replace('\'', "''");
+        let pk_result = conn.prepare(&format!("PRAGMA table_info('{}')", safe_table));
+        if let Ok(mut pk_stmt) = pk_result {
+            let pk_rows = pk_stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?, // name
+                    row.get::<_, bool>(5)?,   // pk
+                ))
+            });
+            if let Ok(pk_iter) = pk_rows {
+                for pk_row in pk_iter {
+                    if let Ok((col_name, is_pk)) = pk_row {
+                        if is_pk {
+                            if let Some(col) = columns.iter_mut().find(|c| c.name == col_name) {
+                                col.primary_key = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(TableStructureData { columns, indexes: vec![], foreign_keys: vec![] })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(result)
+}
+
+async fn get_er_duckdb(config: &serde_json::Value) -> Result<ERDiagramData, String> {
+    let path = config["filePath"].as_str().ok_or("File path is required")?.to_string();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<ERDiagramData, String> {
+        let conn = duckdb::Connection::open(&path).map_err(|e| e.to_string())?;
+
+        let mut table_stmt = conn
+            .prepare("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name")
+            .map_err(|e| e.to_string())?;
+        let table_names: Vec<String> = table_stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut tables = Vec::new();
+
+        for table_name in &table_names {
+            let mut col_stmt = conn.prepare(
+                "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ? AND table_schema = 'main' ORDER BY ordinal_position"
+            ).map_err(|e| e.to_string())?;
+            let col_rows = col_stmt.query_map([table_name.as_str()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }).map_err(|e| e.to_string())?;
+
+            let mut columns = Vec::new();
+            for cr in col_rows {
+                if let Ok((name, col_type)) = cr {
+                    columns.push(ERColumnData { name, r#type: col_type, pk: false, fk: None });
+                }
+            }
+
+            // Try to detect PKs
+            let safe = table_name.replace('\'', "''");
+            if let Ok(mut pk_stmt) = conn.prepare(&format!("PRAGMA table_info('{}')", safe)) {
+                let pk_rows = pk_stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(1)?, row.get::<_, bool>(5)?))
+                });
+                if let Ok(pk_iter) = pk_rows {
+                    for pk_row in pk_iter {
+                        if let Ok((col_name, is_pk)) = pk_row {
+                            if is_pk {
+                                if let Some(c) = columns.iter_mut().find(|c| c.name == col_name) {
+                                    c.pk = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            tables.push(ERTableData { name: table_name.clone(), columns });
+        }
+
+        Ok(ERDiagramData { tables, relations: vec![] })
     })
     .await
     .map_err(|e| e.to_string())??;

@@ -73,7 +73,7 @@ const MCP_TOOLS = [
     type: 'function' as const,
     function: {
       name: 'list_connections',
-      description: 'List all connected database connections with their types (mysql/postgresql/sqlite/mongodb/redis)',
+      description: 'List all connected database connections with their types (mysql/mariadb/postgresql/sqlite/duckdb/mongodb/redis)',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },

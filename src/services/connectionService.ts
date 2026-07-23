@@ -18,6 +18,19 @@ export function parseConnectionUrl(url: string, type: DatabaseType): ConnectionC
           connectionString: url,
         };
       }
+      case 'mariadb': {
+        // mariadb://user:password@host:port/database
+        const match = url.match(/^mariadb:\/\/(?:([^:]+):([^@]*)@)?([^:/]+)?(?::(\d+))?(?:\/(.+))?/);
+        if (!match) return null;
+        return {
+          username: match[1] || undefined,
+          password: match[2] || undefined,
+          host: match[3] || 'localhost',
+          port: match[4] ? parseInt(match[4]) : 3306,
+          database: match[5] || undefined,
+          connectionString: url,
+        };
+      }
       case 'postgresql': {
         // postgresql://user:password@host:port/database
         const match = url.match(/^postgres(?:ql)?:\/\/(?:([^:]+):([^@]*)@)?([^:/]+)?(?::(\d+))?(?:\/(.+))?/);
@@ -34,6 +47,12 @@ export function parseConnectionUrl(url: string, type: DatabaseType): ConnectionC
       case 'sqlite': {
         // sqlite:///path/to/db
         const match = url.match(/^sqlite:\/\/\/(.+)/);
+        if (!match) return null;
+        return { filePath: match[1], connectionString: url };
+      }
+      case 'duckdb': {
+        // duckdb:///path/to/db
+        const match = url.match(/^duckdb:\/\/\/(.+)/);
         if (!match) return null;
         return { filePath: match[1], connectionString: url };
       }
@@ -95,10 +114,14 @@ export function generateConnectionUrl(config: ConnectionConfig, type: DatabaseTy
   switch (type) {
     case 'mysql':
       return `mysql://${config.username || ''}${config.password ? ':' + config.password : ''}${config.username ? '@' : ''}${config.host || 'localhost'}:${config.port || 3306}${config.database ? '/' + config.database : ''}`;
+    case 'mariadb':
+      return `mariadb://${config.username || ''}${config.password ? ':' + config.password : ''}${config.username ? '@' : ''}${config.host || 'localhost'}:${config.port || 3306}${config.database ? '/' + config.database : ''}`;
     case 'postgresql':
       return `postgresql://${config.username || ''}${config.password ? ':' + config.password : ''}${config.username ? '@' : ''}${config.host || 'localhost'}:${config.port || 5432}${config.database ? '/' + config.database : ''}`;
     case 'sqlite':
       return `sqlite:///${config.filePath || ''}`;
+    case 'duckdb':
+      return `duckdb:///${config.filePath || ''}`;
     case 'mongodb': {
       let url = `mongodb://${config.username || ''}${config.password ? ':' + config.password : ''}${config.username ? '@' : ''}${config.host || 'localhost'}:${config.port || 27017}`;
       if (config.database) url += `/${config.database}`;
@@ -130,11 +153,13 @@ export function validateConnectionConfig(config: ConnectionConfig, type: Databas
   const errors: string[] = [];
   switch (type) {
     case 'mysql':
+    case 'mariadb':
     case 'postgresql':
       if (!config.host) errors.push('Host is required');
       if (!config.port) errors.push('Port is required');
       break;
     case 'sqlite':
+    case 'duckdb':
       if (!config.filePath) errors.push('File path is required');
       break;
     case 'mongodb':

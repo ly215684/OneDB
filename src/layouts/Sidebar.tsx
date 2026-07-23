@@ -180,6 +180,11 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       dialog.alert(t('connection.sqliteNoCreateDb'), { title: 'SQLite', variant: 'info' });
       return;
     }
+    // DuckDB doesn't support creating databases (file-based)
+    if (conn.type === 'duckdb') {
+      dialog.alert(t('connection.duckdbNoCreateDb'), { title: 'DuckDB', variant: 'info' });
+      return;
+    }
     // Redis doesn't support creating databases (fixed db0-15)
     if (conn.type === 'redis') {
       dialog.alert(t('connection.redisNoCreateDb'), { title: 'Redis', variant: 'info' });
@@ -196,7 +201,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
 
       if (conn.type === 'mongodb' || conn.type === 'mongodb_srv') {
         query = JSON.stringify({ operation: 'createCollection', collection: safeName });
-      } else if (conn.type === 'mysql') {
+      } else if (conn.type === 'mysql' || conn.type === 'mariadb') {
         query = `CREATE DATABASE \`${safeName}\``;
       } else if (conn.type === 'postgresql') {
         query = `CREATE DATABASE "${safeName}"`;
@@ -222,7 +227,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
   // ─── Database operations ───────────────────────────────
 
   const isRedis = (type: string) => type === 'redis';
-  const isRedisOrSqlite = (type: string) => type === 'redis' || type === 'sqlite';
+  const isRedisOrSqlite = (type: string) => type === 'redis' || type === 'sqlite' || type === 'duckdb';
   const isMongoDB = (type: string) => type === 'mongodb' || type === 'mongodb_srv';
   const supportsTableStructure = (type: string) => !isRedis(type) && !isMongoDB(type);
 
@@ -235,7 +240,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       const isMongo = conn.type === 'mongodb' || conn.type === 'mongodb_srv';
       const query = isMongo
         ? JSON.stringify({ operation: 'dropDatabase' })
-        : conn.type === 'mysql'
+        : (conn.type === 'mysql' || conn.type === 'mariadb')
           ? `DROP DATABASE \`${dbName}\``
           : conn.type === 'postgresql'
             ? `DROP DATABASE "${dbName}"`
@@ -265,12 +270,12 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       let query: string;
       if (isMongo) {
         query = JSON.stringify({ operation: 'createCollection', collection: safeName });
-      } else if (conn.type === 'mysql') {
+      } else if (conn.type === 'mysql' || conn.type === 'mariadb') {
         query = `CREATE TABLE \`${safeName}\` (\`id\` INT NOT NULL AUTO_INCREMENT, PRIMARY KEY (\`id\`))`;
       } else if (conn.type === 'postgresql') {
         query = `CREATE TABLE "${safeName}" (id SERIAL PRIMARY KEY)`;
-      } else if (conn.type === 'sqlite') {
-        query = `CREATE TABLE "${safeName}" (id INTEGER PRIMARY KEY AUTOINCREMENT)`;
+      } else if (conn.type === 'sqlite' || conn.type === 'duckdb') {
+        query = `CREATE TABLE "${safeName}" (id INTEGER PRIMARY KEY)`;
       } else {
         query = `CREATE TABLE ${safeName} (id INT PRIMARY KEY)`;
       }
@@ -396,7 +401,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       let query: string;
       if (isMongo) {
         query = JSON.stringify({ operation: 'dropCollection', collection: tableName });
-      } else if (conn.type === 'mysql') {
+      } else if (conn.type === 'mysql' || conn.type === 'mariadb') {
         query = `DROP TABLE \`${tableName}\``;
       } else {
         query = `DROP TABLE "${tableName}"`;
@@ -425,7 +430,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       let query: string;
       if (isMongo) {
         query = JSON.stringify({ operation: 'deleteMany', collection: tableName, filter: {} });
-      } else if (conn.type === 'mysql') {
+      } else if (conn.type === 'mysql' || conn.type === 'mariadb') {
         query = `TRUNCATE TABLE \`${tableName}\``;
       } else {
         query = `TRUNCATE TABLE "${tableName}"`;
@@ -538,10 +543,12 @@ export function Sidebar({ width = 260 }: SidebarProps) {
   const dbTypeBadge = (type: string) => {
     switch (type) {
       case 'mysql':      return { label: 'My', color: '#00758f' };
+      case 'mariadb':    return { label: 'Ma', color: '#003545' };
       case 'postgresql': return { label: 'Pg', color: '#336791' };
       case 'mongodb':
       case 'mongodb_srv': return { label: 'Mo', color: '#47A248' };
       case 'sqlite':     return { label: 'SL', color: '#0F80AA' };
+      case 'duckdb':     return { label: 'Dk', color: '#FFF000' };
       case 'redis':      return { label: 'Rd', color: '#DC382D' };
       default:           return { label: 'DB', color: '#6b7280' };
     }
