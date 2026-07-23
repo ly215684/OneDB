@@ -387,7 +387,8 @@
     "reopenTab": "Reopen Tab",
     "formatSql": "Format SQL",
     "find": "Find",
-    "replace": "Replace"
+    "replace": "Replace",
+    "toggleAI": "Toggle AI Assistant"
   },
   "security": {
     "storageInfo": "Connection passwords are encrypted and stored locally on your device using AES-256 encryption.",

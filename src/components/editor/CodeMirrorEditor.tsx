@@ -8,6 +8,14 @@ import { autocompletion, type CompletionContext } from '@codemirror/autocomplete
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { useThemeStore } from '../../stores/themeStore';
+import { useSettingsStore } from '../../stores/settingsStore';
+
+/**
+ * Convert shortcut string "Ctrl+Shift+Enter" to CodeMirror key format "Ctrl-Shift-Enter"
+ */
+function toCodeMirrorKey(shortcut: string): string {
+  return shortcut.replace(/\+/g, '-');
+}
 
 // MongoDB operation templates
 const MONGO_OPERATIONS: Record<string, { template: string; detail: string }> = {
@@ -157,6 +165,7 @@ export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false,
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeResolved = useThemeStore((s) => s.resolved);
+  const executeSqlShortcut = useSettingsStore((s) => s.shortcuts.executeSql);
 
   const getExtensions = useCallback(() => {
     const extensions = [
@@ -180,8 +189,8 @@ export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false,
         ...historyKeymap,
         ...searchKeymap,
         {
-          key: 'Ctrl-Enter',
-          mac: 'Cmd-Enter',
+          key: toCodeMirrorKey(executeSqlShortcut),
+          mac: toCodeMirrorKey(executeSqlShortcut).replace('Ctrl', 'Cmd'),
           run: (view) => {
             if (onExecute) {
               const selected = view.state.selection.main;
@@ -235,7 +244,7 @@ export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false,
     }
 
     return extensions;
-  }, [onChange, onExecute, readOnly, tables, themeResolved, placeholderText, isMongo]);
+  }, [onChange, onExecute, readOnly, tables, themeResolved, placeholderText, isMongo, executeSqlShortcut]);
 
   useEffect(() => {
     if (!editorRef.current) return;

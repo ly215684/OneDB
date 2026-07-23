@@ -387,7 +387,8 @@
     "reopenTab": "重新打开标签页",
     "formatSql": "格式化 SQL",
     "find": "查找",
-    "replace": "替换"
+    "replace": "替换",
+    "toggleAI": "打开/关闭 AI 助手"
   },
   "security": {
     "storageInfo": "连接密码已通过 AES-256 加密并存储在本地设备上。",

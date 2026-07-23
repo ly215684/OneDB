@@ -13,6 +13,7 @@ import { Tooltip } from '../ui/Tooltip';
 import { DropdownMenu } from '../ui/DropdownMenu';
 import { exportToFile } from '../../services/exportService';
 import { splitSqlStatements } from '../../utils/sqlSplitter';
+import { useSettingsStore } from '../../stores/settingsStore';
 
 interface SQLEditorProps {
   tabId: string;
@@ -23,6 +24,7 @@ interface SQLEditorProps {
 
 export function SQLEditor({ tabId, connectionId, database: initialDatabase, initialSql = '' }: SQLEditorProps) {
   const { t } = useTranslation();
+  const executeSqlShortcut = useSettingsStore((s) => s.shortcuts.executeSql);
   const [sql, setSql] = useState(initialSql);
   const [results, setResults] = useState<QueryResult[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
@@ -220,7 +222,7 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
           />
         )}
         <div className="w-px h-5 bg-border mx-1" />
-        <Tooltip content={`${t('editor.execute')} (Ctrl+Enter)`}>
+        <Tooltip content={`${t('editor.execute')} (${executeSqlShortcut})`}>
           <Button variant="default" size="sm" className="h-7 gap-1.5" onClick={() => handleExecute(sql, false)}>
             <Play size={12} />{t('editor.execute')}
           </Button>

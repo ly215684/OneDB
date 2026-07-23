@@ -110,6 +110,7 @@ export interface ShortcutSettings {
   formatSql: string;
   find: string;
   replace: string;
+  toggleAI: string;
 }
 
 export interface SecuritySettings {
@@ -153,6 +154,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     formatSql: 'Ctrl+Shift+F',
     find: 'Ctrl+F',
     replace: 'Ctrl+H',
+    toggleAI: 'Ctrl+L',
   },
   security: {
     masterPasswordEnabled: false,
