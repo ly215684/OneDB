@@ -88,7 +88,7 @@ jobs:
             ### Downloads
             | Platform | File |
             |----------|------|
-            | Windows  | `.exe` (NSIS installer), `.msi`, or `onedb-portable-*-windows-x64.exe` (免安装版) |
+            | Windows  | `.exe` (NSIS installer), `.msi`, or `onedb-portable-*-windows-x64.zip` (免安装版，含 VC++ 运行时) |
             | macOS    | `.dmg` (Apple Silicon & Intel) |
             | Linux    | `.deb` or `.AppImage` |
 
