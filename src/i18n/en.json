@@ -445,5 +445,23 @@
     "exportSuccess": "Successfully exported {{count}} table(s)",
     "importSuccess": "Successfully imported {{count}} record(s) into {{table}}",
     "syncSuccess": "Successfully synced {{count}} record(s)"
+  },
+  "driver": {
+    "count": "{{count}} drivers",
+    "checkUpdates": "Check Updates",
+    "checking": "Checking...",
+    "install": "Install",
+    "installed": "Installed",
+    "outdated": "Outdated",
+    "available": "Available",
+    "list": {
+      "mysql": { "name": "MySQL Connector", "version": "8.0.33" },
+      "mariadb": { "name": "MariaDB Connector", "version": "3.1.1" },
+      "postgresql": { "name": "PostgreSQL JDBC", "version": "42.6.0" },
+      "sqlite": { "name": "SQLite Driver", "version": "3.42.0" },
+      "duckdb": { "name": "DuckDB Driver", "version": "1.0.0" },
+      "mongodb": { "name": "MongoDB Node Driver", "version": "5.7.0" },
+      "redis": { "name": "Redis Client", "version": "4.6.7" }
+    }
   }
 }

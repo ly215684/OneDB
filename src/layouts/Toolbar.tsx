@@ -14,7 +14,6 @@ import {
   FileText,
   ArrowLeftRight,
   Puzzle,
-  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Sun,
@@ -114,18 +113,6 @@ export function Toolbar({ onToggleSidebar, sidebarCollapsed }: ToolbarProps) {
         <HoverTooltip content={t('toolbar.driverManager')} position="bottom">
           <IconButton icon={Puzzle} size={16} onClick={() => setDriverOpen(true)} label={t('toolbar.driverManager')} />
         </HoverTooltip>
-
-        <DropdownMenu
-          items={[
-            { label: 'Option 1' },
-            { label: 'Option 2' },
-          ]}
-          trigger={
-            <HoverTooltip content={t('toolbar.more')} position="bottom">
-              <IconButton icon={MoreHorizontal} size={16} label={t('toolbar.more')} />
-            </HoverTooltip>
-          }
-        />
       </div>
 
       {/* Center - Connection Info */}

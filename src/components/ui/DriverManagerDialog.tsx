@@ -12,21 +12,29 @@ interface DriverManagerDialogProps {
 }
 
 interface DriverInfo {
-  name: string;
   type: string;
-  version: string;
   status: 'installed' | 'available' | 'outdated';
   icon: string;
 }
 
+const DRIVER_ICONS: Record<string, string> = {
+  mysql: '🐬',
+  mariadb: '🦭',
+  postgresql: '🐘',
+  sqlite: '🗄️',
+  duckdb: '🦆',
+  mongodb: '🍃',
+  redis: '🔴',
+};
+
 const MOCK_DRIVERS: DriverInfo[] = [
-  { name: 'MySQL Connector', type: 'mysql', version: '8.0.33', status: 'installed', icon: '🐬' },
-  { name: 'MariaDB Connector', type: 'mariadb', version: '3.1.1', status: 'installed', icon: '🦭' },
-  { name: 'PostgreSQL JDBC', type: 'postgresql', version: '42.6.0', status: 'installed', icon: '🐘' },
-  { name: 'SQLite Driver', type: 'sqlite', version: '3.42.0', status: 'installed', icon: '🗄️' },
-  { name: 'DuckDB Driver', type: 'duckdb', version: '1.0.0', status: 'installed', icon: '🦆' },
-  { name: 'MongoDB Node Driver', type: 'mongodb', version: '5.7.0', status: 'installed', icon: '🍃' },
-  { name: 'Redis Client', type: 'redis', version: '4.6.7', status: 'installed', icon: '🔴' },
+  { type: 'mysql', status: 'installed', icon: DRIVER_ICONS.mysql },
+  { type: 'mariadb', status: 'installed', icon: DRIVER_ICONS.mariadb },
+  { type: 'postgresql', status: 'installed', icon: DRIVER_ICONS.postgresql },
+  { type: 'sqlite', status: 'installed', icon: DRIVER_ICONS.sqlite },
+  { type: 'duckdb', status: 'installed', icon: DRIVER_ICONS.duckdb },
+  { type: 'mongodb', status: 'installed', icon: DRIVER_ICONS.mongodb },
+  { type: 'redis', status: 'installed', icon: DRIVER_ICONS.redis },
 ];
 
 export function DriverManagerDialog({ open, onClose }: DriverManagerDialogProps) {
@@ -55,10 +63,12 @@ export function DriverManagerDialog({ open, onClose }: DriverManagerDialogProps)
       <div className="p-4 space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">{drivers.length} drivers</span>
+          <span className="text-xs text-muted-foreground">
+            {t('driver.count', { count: drivers.length })}
+          </span>
           <Button variant="outline" size="sm" onClick={handleCheckUpdates} disabled={checking}>
             <RefreshCw size={12} className={clsx('mr-1.5', checking && 'animate-spin')} />
-            {checking ? 'Checking...' : 'Check Updates'}
+            {checking ? t('driver.checking') : t('driver.checkUpdates')}
           </Button>
         </div>
 
@@ -72,12 +82,20 @@ export function DriverManagerDialog({ open, onClose }: DriverManagerDialogProps)
               <span className="text-xl">{driver.icon}</span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{driver.name}</span>
+                  <span className="text-sm font-medium">
+                    {t(`driver.list.${driver.type}.name`)}
+                  </span>
                   <Badge variant={driver.status === 'installed' ? 'success' : 'default'}>
-                    {driver.status === 'installed' ? 'Installed' : driver.status === 'outdated' ? 'Outdated' : 'Available'}
+                    {driver.status === 'installed'
+                      ? t('driver.installed')
+                      : driver.status === 'outdated'
+                        ? t('driver.outdated')
+                        : t('driver.available')}
                   </Badge>
                 </div>
-                <span className="text-2xs text-muted-foreground">v{driver.version}</span>
+                <span className="text-2xs text-muted-foreground">
+                  v{t(`driver.list.${driver.type}.version`)}
+                </span>
               </div>
               {driver.status === 'installed' ? (
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemove(driver.type)}>
@@ -86,7 +104,7 @@ export function DriverManagerDialog({ open, onClose }: DriverManagerDialogProps)
               ) : (
                 <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={() => handleInstall(driver.type)}>
                   <Download size={12} />
-                  Install
+                  {t('driver.install')}
                 </Button>
               )}
             </div>

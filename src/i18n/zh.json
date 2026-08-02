@@ -445,5 +445,23 @@
     "exportSuccess": "成功导出 {{count}} 张表",
     "importSuccess": "成功导入 {{count}} 条记录到 {{table}}",
     "syncSuccess": "成功同步 {{count}} 条记录"
+  },
+  "driver": {
+    "count": "{{count}} 个驱动",
+    "checkUpdates": "检查更新",
+    "checking": "检查中...",
+    "install": "安装",
+    "installed": "已安装",
+    "outdated": "有更新",
+    "available": "可用",
+    "list": {
+      "mysql": { "name": "MySQL 连接器", "version": "8.0.33" },
+      "mariadb": { "name": "MariaDB 连接器", "version": "3.1.1" },
+      "postgresql": { "name": "PostgreSQL JDBC", "version": "42.6.0" },
+      "sqlite": { "name": "SQLite 驱动", "version": "3.42.0" },
+      "duckdb": { "name": "DuckDB 驱动", "version": "1.0.0" },
+      "mongodb": { "name": "MongoDB Node 驱动", "version": "5.7.0" },
+      "redis": { "name": "Redis 客户端", "version": "4.6.7" }
+    }
   }
 }
