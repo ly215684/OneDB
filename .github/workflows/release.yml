@@ -29,7 +29,7 @@ jobs:
             args: ''
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            args: ''
+            args: '--config src-tauri/tauri.release.conf.json'
 
     runs-on: ${{ matrix.platform }}
 
@@ -72,6 +72,33 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # ── Stage VC++ runtime DLLs (Windows) ──
+      # DuckDB (bundled) is compiled with MSVC and dynamically links vcruntime140.dll /
+      # msvcp140.dll. We copy the redistributable CRT DLLs next to the binary and write
+      # a Tauri config override (tauri.release.conf.json) that lists them as bundle
+      # `resources`. The override is passed via the Windows matrix `args: --config ...`
+      # so ONLY the Windows build bundles them — putting `resources` in the committed
+      # tauri.conf.json would break macOS/Linux builds (Tauri errors on a glob that
+      # matches no files). The portable archive also pulls DLLs from src-tauri/vcredist.
+      - name: Stage VC++ runtime DLLs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -latest -property installationPath
+          $redistRoot = Join-Path $installPath 'VC\Redist\MSVC'
+          $verDir = Get-ChildItem $redistRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          $crtDir = Get-ChildItem (Join-Path $verDir.FullName 'x64') -Directory -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
+          if (-not $crtDir) { throw "Could not locate VC++ CRT redist under $redistRoot" }
+          Write-Host "VC++ CRT dir: $($crtDir.FullName)"
+          New-Item -ItemType Directory -Force -Path "src-tauri\vcredist" | Out-Null
+          New-Item -ItemType Directory -Force -Path "src-tauri\target\release" | Out-Null
+          Copy-Item "$($crtDir.FullName)\*.dll" "src-tauri\vcredist\" -Force
+          Copy-Item "$($crtDir.FullName)\*.dll" "src-tauri\target\release\" -Force
+          '{"bundle":{"resources":["vcredist/*.dll"]}}' | Set-Content -Path "src-tauri\tauri.release.conf.json" -Encoding utf8
+          Write-Host "Staged DLLs:"
+          Get-ChildItem "src-tauri\vcredist\*.dll" | Select-Object -ExpandProperty Name
+
       # ── Build & bundle ──
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -98,14 +125,19 @@ jobs:
           args: ${{ matrix.args }}
 
       # ── Windows portable build ──
-      - name: Create portable executable (Windows)
+      - name: Create portable archive (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          Copy-Item "src-tauri\target\release\onedb.exe" "onedb-portable-${{ github.ref_name }}-windows-x64.exe"
+          $stage = "portable-stage"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "src-tauri\target\release\onedb.exe" "$stage\" -Force
+          Copy-Item "src-tauri\vcredist\*.dll" "$stage\" -Force
+          Compress-Archive -Path "$stage\*" -DestinationPath "onedb-portable-${{ github.ref_name }}-windows-x64.zip" -Force
 
       # ── Upload portable to release ──
       - name: Upload portable release asset
         if: runner.os == 'Windows'
         uses: softprops/action-gh-release@v2
         with:
-          files: onedb-portable-${{ github.ref_name }}-windows-x64.exe
+          files: onedb-portable-${{ github.ref_name }}-windows-x64.zip
