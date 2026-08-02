@@ -86,10 +86,16 @@ jobs:
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $installPath = & $vswhere -latest -property installationPath
-          $redistRoot = Join-Path $installPath 'VC\Redist\MSVC'
-          $verDir = Get-ChildItem $redistRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
-          $crtDir = Get-ChildItem (Join-Path $verDir.FullName 'x64') -Directory -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
-          if (-not $crtDir) { throw "Could not locate VC++ CRT redist under $redistRoot" }
+          $redistRoot = Join-Path $installPath 'VC\Redist'
+          # Recursively locate the x64 CRT folder. The intermediate version dir naming
+          # differs across VS versions (e.g. 14.40.33807 vs a v145 dir that lacks x64),
+          # so don't assume a fixed structure — search for Microsoft.VC*.CRT directly.
+          $candidates = Get-ChildItem -Path $redistRoot -Recurse -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue
+          $crtDir = $candidates | Where-Object { $_.Parent.Name -eq 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $crtDir) {
+            $crtDir = $candidates | Where-Object { Test-Path (Join-Path $_.FullName 'vcruntime140.dll') } | Sort-Object FullName -Descending | Select-Object -First 1
+          }
+          if (-not $crtDir) { throw "Could not locate VC++ x64 CRT redist under $redistRoot" }
           Write-Host "VC++ CRT dir: $($crtDir.FullName)"
           New-Item -ItemType Directory -Force -Path "src-tauri\vcredist" | Out-Null
           New-Item -ItemType Directory -Force -Path "src-tauri\target\release" | Out-Null
