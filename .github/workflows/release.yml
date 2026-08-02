@@ -29,7 +29,7 @@ jobs:
             args: ''
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            args: '--config src-tauri/tauri.release.conf.json'
+            args: ''
 
     runs-on: ${{ matrix.platform }}
 
@@ -74,12 +74,19 @@ jobs:
 
       # ── Stage VC++ runtime DLLs (Windows) ──
       # DuckDB (bundled) is compiled with MSVC and dynamically links vcruntime140.dll /
-      # msvcp140.dll. We copy the redistributable CRT DLLs next to the binary and write
-      # a Tauri config override (tauri.release.conf.json) that lists them as bundle
-      # `resources`. The override is passed via the Windows matrix `args: --config ...`
-      # so ONLY the Windows build bundles them — putting `resources` in the committed
-      # tauri.conf.json would break macOS/Linux builds (Tauri errors on a glob that
-      # matches no files). The portable archive also pulls DLLs from src-tauri/vcredist.
+      # msvcp140.dll. We copy the redistributable CRT DLLs and PATCH tauri.conf.json
+      # in-place so that the Tauri bundler picks them up as `bundle.resources`.
+      #
+      # Why patch the config instead of committing `resources`?
+      #   - `resources` with a glob that matches nothing FAILS the Tauri build on
+      #     macOS/Linux (where vcredist/ is absent).
+      #   - We use Tauri's resource MAP syntax (`{src: dst}`) so the DLLs are FLATTENED
+      #     into the install dir (next to onedb.exe), NOT into a `vcredist/` subfolder.
+      #     Windows DLL loader won't search subdirectories — the DLLs MUST sit beside
+      #     the exe.
+      #
+      # The map is built dynamically from the actual DLLs found in the CRT redist
+      # so it stays robust across VS versions.
       - name: Stage VC++ runtime DLLs (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -87,9 +94,6 @@ jobs:
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $installPath = & $vswhere -latest -property installationPath
           $redistRoot = Join-Path $installPath 'VC\Redist'
-          # Recursively locate the x64 CRT folder. The intermediate version dir naming
-          # differs across VS versions (e.g. 14.40.33807 vs a v145 dir that lacks x64),
-          # so don't assume a fixed structure — search for Microsoft.VC*.CRT directly.
           $candidates = Get-ChildItem -Path $redistRoot -Recurse -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue
           $crtDir = $candidates | Where-Object { $_.Parent.Name -eq 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
           if (-not $crtDir) {
@@ -97,13 +101,31 @@ jobs:
           }
           if (-not $crtDir) { throw "Could not locate VC++ x64 CRT redist under $redistRoot" }
           Write-Host "VC++ CRT dir: $($crtDir.FullName)"
+
+          # Copy DLLs next to the exe (for portable archive) and to vcredist/ (for resources)
           New-Item -ItemType Directory -Force -Path "src-tauri\vcredist" | Out-Null
           New-Item -ItemType Directory -Force -Path "src-tauri\target\release" | Out-Null
           Copy-Item "$($crtDir.FullName)\*.dll" "src-tauri\vcredist\" -Force
           Copy-Item "$($crtDir.FullName)\*.dll" "src-tauri\target\release\" -Force
-          '{"bundle":{"resources":["vcredist/*.dll"]}}' | Set-Content -Path "src-tauri\tauri.release.conf.json" -Encoding utf8
-          Write-Host "Staged DLLs:"
-          Get-ChildItem "src-tauri\vcredist\*.dll" | Select-Object -ExpandProperty Name
+
+          # Build a resource MAP object: { "vcredist/<name>.dll": "<name>.dll", ... }
+          # This flattens DLLs to the install root (next to onedb.exe).
+          $dllFiles = Get-ChildItem "src-tauri\vcredist\*.dll" | Sort-Object Name
+          $resourceMap = [ordered]@{}
+          foreach ($f in $dllFiles) {
+            $resourceMap["vcredist/$($f.Name)"] = $f.Name
+          }
+          Write-Host "Resource map:"
+          $resourceMap | ConvertTo-Json -Compress
+
+          # Patch tauri.conf.json: set bundle.resources to the map
+          $cfgPath = "src-tauri\tauri.conf.json"
+          $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
+          $cfg.bundle | Add-Member -NotePropertyName resources -NotePropertyValue $resourceMap -Force
+          $cfg | ConvertTo-Json -Depth 10 | Set-Content $cfgPath -Encoding utf8
+
+          Write-Host "Patched tauri.conf.json bundle.resources:"
+          (Get-Content $cfgPath -Raw | ConvertFrom-Json).bundle.resources | ConvertTo-Json -Compress
 
       # ── Build & bundle ──
       - name: Build Tauri app
@@ -129,6 +151,25 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+      # ── Verify bundling (Windows) ──
+      # Confirm the patched config and staged DLLs are visible after the build.
+      - name: Verify DLLs are staged for bundling (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "=== DLLs staged in vcredist/ ==="
+          Get-ChildItem "src-tauri\vcredist\*.dll" -ErrorAction SilentlyContinue | Format-Table Name, Length
+          Write-Host ""
+          Write-Host "=== DLLs next to onedb.exe ==="
+          Get-ChildItem "src-tauri\target\release\*.dll" -ErrorAction SilentlyContinue | Format-Table Name, Length
+          Write-Host ""
+          Write-Host "=== Patched tauri.conf.json bundle.resources ==="
+          $cfg = Get-Content "src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json
+          $cfg.bundle.resources | ConvertTo-Json -Compress
+          Write-Host ""
+          Write-Host "=== NSIS bundle output ==="
+          Get-ChildItem "src-tauri\target\release\bundle\nsis\" -ErrorAction SilentlyContinue -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
 
       # ── Windows portable build ──
       - name: Create portable archive (Windows)
