@@ -150,8 +150,13 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
       }
     : null;
 
-  const isRowSelected = (rowIdx: number) =>
-    !!selRange && rowIdx >= selRange.rowStart && rowIdx <= selRange.rowEnd;
+  // Full-row highlight only when ALL columns are selected (row-number click or # double-click)
+  const isFullRowSelected = (rowIdx: number) =>
+    !!selRange &&
+    rowIdx >= selRange.rowStart &&
+    rowIdx <= selRange.rowEnd &&
+    selRange.colStart === 0 &&
+    selRange.colEnd === columns.length - 1;
 
   const isCellSelected = (rowIdx: number, colIdx: number) =>
     !!selRange &&
@@ -191,33 +196,11 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
       isSelectingRef.current = false;
     };
 
-    const onClick = (e: MouseEvent) => {
-      const now = Date.now();
-      const target = e.target;
-      if (now - lastClickTimeRef.current < 300 && target === lastClickTargetRef.current) {
-        // Double-click detected
-        const el = target as HTMLElement;
-        const th = el.closest('th');
-        if (th) {
-          if (el.closest('thead') && !th.hasAttribute('data-col')) {
-            // Double-click on "#" header → select all
-            handleRowNumberDoubleClick();
-          }
-        }
-        lastClickTimeRef.current = 0;
-        return;
-      }
-      lastClickTimeRef.current = now;
-      lastClickTargetRef.current = target;
-    };
-
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
-    document.addEventListener('click', onClick);
     return () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
-      document.removeEventListener('click', onClick);
     };
   }, []);
 
@@ -322,7 +305,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
 
   const handleRowHeaderContextMenu = (rowIdx: number, e: ReactMouseEvent) => {
     e.preventDefault();
-    if (!isRowSelected(rowIdx)) selectRow(rowIdx);
+    if (!isFullRowSelected(rowIdx)) selectRow(rowIdx);
     setContextMenu({ x: e.clientX, y: e.clientY });
   };
 
@@ -498,11 +481,11 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
               {pagedRows.map((row, rowIdx) => (
                 <tr
                   key={rowIdx}
-                  className={`${isRowSelected(rowIdx) ? 'bg-selection' : rowIdx % 2 === 0 ? '' : 'bg-muted/20'} hover:bg-hover/50`}
+                  className={`${isFullRowSelected(rowIdx) ? 'bg-selection' : rowIdx % 2 === 0 ? '' : 'bg-muted/20'} hover:bg-hover/50`}
                 >
                   <td
                     className={`px-1 py-1 border-b border-r border-border text-center text-2xs cursor-pointer ${
-                      isRowSelected(rowIdx) ? 'bg-selection text-foreground' : 'text-muted-foreground hover:bg-hover'
+                      isFullRowSelected(rowIdx) ? 'bg-selection text-foreground' : 'text-muted-foreground hover:bg-hover'
                     }`}
                     onClick={(e) => selectRow(rowIdx, e.shiftKey)}
                     onContextMenu={(e) => handleRowHeaderContextMenu(rowIdx, e)}
