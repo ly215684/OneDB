@@ -69,6 +69,8 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   const [selection, setSelection] = useState<CellRange | null>(null);
   const anchorRef = useRef<{ row: number; col: number } | null>(null);
   const isSelectingRef = useRef(false);
+  const tbodyRef = useRef<HTMLTableSectionElement>(null);
+  const lastHoveredRef = useRef<string | null>(null);
   // Context menu
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   // Editing
@@ -167,6 +169,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   useEffect(() => {
     const onMouseUp = () => {
       isSelectingRef.current = false;
+      lastHoveredRef.current = null;
     };
     document.addEventListener('mouseup', onMouseUp);
     return () => document.removeEventListener('mouseup', onMouseUp);
@@ -186,10 +189,39 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
     }
   };
 
-  const handleCellMouseEnter = (rowIdx: number, colIdx: number) => {
-    if (!isSelectingRef.current || !anchorRef.current) return;
-    setSelection({ rowStart: anchorRef.current.row, rowEnd: rowIdx, colStart: anchorRef.current.col, colEnd: colIdx });
+  // Double-click "#" header selects all rows and columns
+  const handleRowNumberDoubleClick = () => {
+    if (pagedRows.length === 0 || columns.length === 0) return;
+    anchorRef.current = { row: 0, col: 0 };
+    setSelection({ rowStart: 0, rowEnd: pagedRows.length - 1, colStart: 0, colEnd: columns.length - 1 });
   };
+
+  // Double-click column header selects all rows in that column
+  const handleHeaderDoubleClick = (colIdx: number) => {
+    if (pagedRows.length === 0) return;
+    anchorRef.current = { row: 0, col: colIdx };
+    setSelection({ rowStart: 0, rowEnd: pagedRows.length - 1, colStart: colIdx, colEnd: colIdx });
+  };
+
+  // Reliable drag-selection using tbody mousemove + data attributes
+  const handleTbodyMouseMove = useCallback((e: ReactMouseEvent) => {
+    if (!isSelectingRef.current || !anchorRef.current) return;
+    const target = e.target as HTMLElement;
+    const cell = target.closest('td[data-row]');
+    if (!cell) return;
+    const row = Number(cell.getAttribute('data-row'));
+    const col = Number(cell.getAttribute('data-col'));
+    if (isNaN(row) || isNaN(col)) return;
+    const key = `${row}-${col}`;
+    if (key === lastHoveredRef.current) return;
+    lastHoveredRef.current = key;
+    setSelection({
+      rowStart: anchorRef.current.row,
+      rowEnd: row,
+      colStart: anchorRef.current.col,
+      colEnd: col,
+    });
+  }, []);
 
   const selectRow = (rowIdx: number, extend = false) => {
     if (columns.length === 0) return;
@@ -199,13 +231,6 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
       anchorRef.current = { row: rowIdx, col: 0 };
       setSelection({ rowStart: rowIdx, rowEnd: rowIdx, colStart: 0, colEnd: columns.length - 1 });
     }
-  };
-
-  // Double-click header selects the whole column
-  const handleHeaderDoubleClick = (colIdx: number) => {
-    if (pagedRows.length === 0) return;
-    anchorRef.current = { row: 0, col: colIdx };
-    setSelection({ rowStart: 0, rowEnd: pagedRows.length - 1, colStart: colIdx, colEnd: colIdx });
   };
 
   const getSelectedSlice = () => {
@@ -401,7 +426,10 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
           <table className="min-w-full text-xs border-collapse select-none">
             <thead className="sticky top-0 z-10">
               <tr className="bg-muted">
-                <th className="w-10 px-1 py-1.5 border-b border-r border-border text-center text-muted-foreground text-2xs">
+                <th
+                  className="w-10 px-1 py-1.5 border-b border-r border-border text-center text-muted-foreground text-2xs cursor-pointer select-none hover:bg-hover"
+                  onDoubleClick={handleRowNumberDoubleClick}
+                >
                   #
                 </th>
                 {columns.map((col, colIdx) => (
@@ -423,7 +451,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody ref={tbodyRef} onMouseMove={handleTbodyMouseMove}>
               {pagedRows.map((row, rowIdx) => (
                 <tr
                   key={rowIdx}
@@ -444,8 +472,9 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
                       className={`px-2 py-1 border-b border-r border-border whitespace-nowrap max-w-[200px] truncate cursor-cell ${
                         isCellSelected(rowIdx, colIdx) ? 'bg-primary/20' : ''
                       }`}
+                      data-row={rowIdx}
+                      data-col={colIdx}
                       onMouseDown={(e) => handleCellMouseDown(rowIdx, colIdx, e)}
-                      onMouseEnter={() => handleCellMouseEnter(rowIdx, colIdx)}
                       onContextMenu={(e) => handleCellContextMenu(rowIdx, colIdx, e)}
                       onDoubleClick={() => startEdit(rowIdx, col)}
                     >

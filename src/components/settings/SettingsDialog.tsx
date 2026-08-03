@@ -139,7 +139,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground font-medium mb-1 block">Tab Size</label>
+                    <label className="text-xs text-muted-foreground font-medium mb-1 block">{t('settings.tabSize')}</label>
                     <input
                       type="number"
                       value={settings.editor.tabSize}
@@ -170,7 +170,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     onChange={(e) => settings.updateEditor({ wordWrap: e.target.checked })}
                     className="rounded border-border"
                   />
-                  Word Wrap
+                  {t('settings.wordWrap')}
                 </label>
                 <label className="flex items-center gap-2 text-xs cursor-pointer">
                   <input
@@ -179,7 +179,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     onChange={(e) => settings.updateEditor({ lineNumbers: e.target.checked })}
                     className="rounded border-border"
                   />
-                  Line Numbers
+                  {t('settings.lineNumbers')}
                 </label>
               </div>
             </div>
