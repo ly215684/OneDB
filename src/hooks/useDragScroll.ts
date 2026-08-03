@@ -3,8 +3,9 @@ import { useRef, useCallback, useEffect } from 'react';
 /**
  * Hook to enable drag-to-scroll on a container element.
  * Click and drag to scroll horizontally and vertically.
+ * @param enabled set to false to disable drag-to-scroll (e.g. when box-selection is active)
  */
-export function useDragScroll() {
+export function useDragScroll(enabled = true) {
   const ref = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const startX = useRef(0);
@@ -16,7 +17,7 @@ export function useDragScroll() {
     const el = ref.current;
     if (!el) return;
     // Only activate on left mouse button
-    if (e.button !== 0) return;
+    if (!enabled || e.button !== 0) return;
     isDragging.current = true;
     startX.current = e.clientX;
     startY.current = e.clientY;
@@ -24,7 +25,7 @@ export function useDragScroll() {
     scrollTop.current = el.scrollTop;
     el.style.cursor = 'grabbing';
     el.style.userSelect = 'none';
-  }, []);
+  }, [enabled]);
 
   const onMouseMove = useCallback((e: MouseEvent) => {
     if (!isDragging.current || !ref.current) return;

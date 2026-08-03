@@ -150,6 +150,19 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     />
                   </div>
                 </div>
+                <div>
+                  <label className="text-xs text-muted-foreground font-medium mb-1 block">{t('settings.defaultPageSize')}</label>
+                  <select
+                    value={settings.editor.defaultPageSize}
+                    onChange={(e) => settings.updateEditor({ defaultPageSize: Number(e.target.value) })}
+                    className="w-full h-8 px-3 text-sm rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {[10, 20, 50, 100, 200, 500].map((size) => (
+                      <option key={size} value={size}>{size}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-2xs text-muted-foreground">{t('settings.defaultPageSizeDesc')}</p>
+                </div>
                 <label className="flex items-center gap-2 text-xs cursor-pointer">
                   <input
                     type="checkbox"

@@ -51,6 +51,19 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'onedb-settings',
       storage: createJSONStorage(() => tauriStorage),
+      merge: (persisted, current) => {
+        // Deep merge so newly added settings fields fall back to defaults
+        const p = (persisted ?? {}) as Partial<SettingsState>;
+        return {
+          ...current,
+          ...p,
+          editor: { ...current.editor, ...(p.editor ?? {}) },
+          ai: { ...current.ai, ...(p.ai ?? {}) },
+          shortcuts: { ...current.shortcuts, ...(p.shortcuts ?? {}) },
+          security: { ...current.security, ...(p.security ?? {}) },
+          storage: { ...current.storage, ...(p.storage ?? {}) },
+        };
+      },
       partialize: (state) => {
         // Don't persist isLocked - it's a runtime state
         const { isLocked, ...rest } = state;

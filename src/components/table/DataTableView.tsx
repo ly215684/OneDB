@@ -1,11 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useConnectionStore } from '../../stores/connectionStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { executeQuery } from '../../services/connectionService';
-import { exportToFile } from '../../services/exportService';
+import { exportToFile, exportData } from '../../services/exportService';
 import { useDragScroll } from '../../hooks/useDragScroll';
 import { Button } from '../ui/Button';
-import { DropdownMenu } from '../ui/DropdownMenu';
+import { DropdownMenu, ContextMenu } from '../ui/DropdownMenu';
+import { useMessage } from '../ui/Message';
 import {
   RefreshCw,
   Plus,
@@ -16,10 +19,9 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
   Search,
+  Copy,
+  FileCode2,
 } from 'lucide-react';
 
 interface DataTableViewProps {
@@ -32,12 +34,20 @@ interface RowData {
   [key: string]: unknown;
 }
 
+interface CellRange {
+  rowStart: number;
+  rowEnd: number;
+  colStart: number;
+  colEnd: number;
+}
+
 export function DataTableView({ tableName, connectionId, database }: DataTableViewProps) {
   const { t } = useTranslation();
   const getConnection = useConnectionStore((s) => s.getConnection);
   const conn = connectionId ? getConnection(connectionId) : undefined;
   const isNoSql = conn?.type === 'mongodb' || conn?.type === 'mongodb_srv' || conn?.type === 'redis';
-  const dragScrollRef = useDragScroll();
+  const dragScrollRef = useDragScroll(false);
+  const msg = useMessage();
 
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<RowData[]>([]);
@@ -49,14 +59,18 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   // Filtering
   const [filterText, setFilterText] = useState('');
   // Pagination
-  const [pageSize, setPageSize] = useState(50);
-  const pageSizeOptions = [10, 20, 50, 100, 200, 500];
+  const defaultPageSize = useSettingsStore((s) => s.editor.defaultPageSize);
+  const [pageSize, setPageSize] = useState(defaultPageSize || 50);
+  const pageSizeOptions = [10, 20, 50, 100, 200, 500].includes(pageSize)
+    ? [10, 20, 50, 100, 200, 500]
+    : [10, 20, 50, 100, 200, 500, pageSize].sort((a, b) => a - b);
   const [currentPage, setCurrentPage] = useState(1);
-  // Sort
-  const [sortCol, setSortCol] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  // Selection
-  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  // Range selection (box selection of cells)
+  const [selection, setSelection] = useState<CellRange | null>(null);
+  const anchorRef = useRef<{ row: number; col: number } | null>(null);
+  const isSelectingRef = useRef(false);
+  // Context menu
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   // Editing
   const [editingCell, setEditingCell] = useState<{ row: number; col: string } | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -76,7 +90,6 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
         countQuery = JSON.stringify({ collection: tableName, operation: 'count', filter: {} });
       } else {
         const parts = [`SELECT * FROM ${tableName}`];
-        if (sortCol) parts.push(`ORDER BY ${sortCol} ${sortDir.toUpperCase()}`);
         parts.push(`LIMIT ${pageSize} OFFSET ${(currentPage - 1) * pageSize}`);
         query = parts.join(' ');
         countQuery = `SELECT COUNT(*) as cnt FROM ${tableName}`;
@@ -105,7 +118,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
     } finally {
       setLoading(false);
     }
-  }, [conn, tableName, database, isNoSql, sortCol, sortDir, currentPage, pageSize]);
+  }, [conn, tableName, database, isNoSql, currentPage, pageSize]);
 
   useEffect(() => {
     fetchData();
@@ -124,23 +137,158 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
   const pagedRows = filteredRows;
 
-  const handleSort = (col: string) => {
-    if (sortCol === col) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+  // Normalized selection range
+  const selRange = selection
+    ? {
+        rowStart: Math.min(selection.rowStart, selection.rowEnd),
+        rowEnd: Math.max(selection.rowStart, selection.rowEnd),
+        colStart: Math.min(selection.colStart, selection.colEnd),
+        colEnd: Math.max(selection.colStart, selection.colEnd),
+      }
+    : null;
+
+  const isRowSelected = (rowIdx: number) =>
+    !!selRange && rowIdx >= selRange.rowStart && rowIdx <= selRange.rowEnd;
+
+  const isCellSelected = (rowIdx: number, colIdx: number) =>
+    !!selRange &&
+    rowIdx >= selRange.rowStart &&
+    rowIdx <= selRange.rowEnd &&
+    colIdx >= selRange.colStart &&
+    colIdx <= selRange.colEnd;
+
+  // Clear selection when data view changes
+  useEffect(() => {
+    setSelection(null);
+    anchorRef.current = null;
+  }, [rows, currentPage, pageSize, filterText]);
+
+  // End box selection on mouseup anywhere
+  useEffect(() => {
+    const onMouseUp = () => {
+      isSelectingRef.current = false;
+    };
+    document.addEventListener('mouseup', onMouseUp);
+    return () => document.removeEventListener('mouseup', onMouseUp);
+  }, []);
+
+  const handleCellMouseDown = (rowIdx: number, colIdx: number, e: ReactMouseEvent) => {
+    if (e.button !== 0) return;
+    // Do not interfere with the active cell editor
+    if (editingCell && editingCell.row === rowIdx && editingCell.col === columns[colIdx]) return;
+    e.preventDefault();
+    isSelectingRef.current = true;
+    if (e.shiftKey && anchorRef.current) {
+      setSelection({ rowStart: anchorRef.current.row, rowEnd: rowIdx, colStart: anchorRef.current.col, colEnd: colIdx });
     } else {
-      setSortCol(col);
-      setSortDir('asc');
+      anchorRef.current = { row: rowIdx, col: colIdx };
+      setSelection({ rowStart: rowIdx, rowEnd: rowIdx, colStart: colIdx, colEnd: colIdx });
     }
   };
 
-  const toggleRowSelection = (index: number) => {
-    setSelectedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
-      return next;
-    });
+  const handleCellMouseEnter = (rowIdx: number, colIdx: number) => {
+    if (!isSelectingRef.current || !anchorRef.current) return;
+    setSelection({ rowStart: anchorRef.current.row, rowEnd: rowIdx, colStart: anchorRef.current.col, colEnd: colIdx });
   };
+
+  const selectRow = (rowIdx: number, extend = false) => {
+    if (columns.length === 0) return;
+    if (extend && anchorRef.current) {
+      setSelection({ rowStart: anchorRef.current.row, rowEnd: rowIdx, colStart: 0, colEnd: columns.length - 1 });
+    } else {
+      anchorRef.current = { row: rowIdx, col: 0 };
+      setSelection({ rowStart: rowIdx, rowEnd: rowIdx, colStart: 0, colEnd: columns.length - 1 });
+    }
+  };
+
+  // Double-click header selects the whole column
+  const handleHeaderDoubleClick = (colIdx: number) => {
+    if (pagedRows.length === 0) return;
+    anchorRef.current = { row: 0, col: colIdx };
+    setSelection({ rowStart: 0, rowEnd: pagedRows.length - 1, colStart: colIdx, colEnd: colIdx });
+  };
+
+  const getSelectedSlice = () => {
+    if (!selRange) return null;
+    const cols = columns.slice(selRange.colStart, selRange.colEnd + 1);
+    const rowsData = pagedRows.slice(selRange.rowStart, selRange.rowEnd + 1);
+    return { cols, rowsData };
+  };
+
+  const formatTextValue = (value: unknown): string => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+  };
+
+  const copyAsText = useCallback(async () => {
+    const slice = getSelectedSlice();
+    if (!slice || slice.rowsData.length === 0) return;
+    const text = slice.rowsData
+      .map((row) => slice.cols.map((col) => formatTextValue(row[col])).join('\t'))
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      msg.success(t('table.copied'));
+    } catch {
+      msg.error(t('table.copyFailed'));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selRange, pagedRows, columns]);
+
+  const copyAsSql = async () => {
+    const slice = getSelectedSlice();
+    if (!slice || slice.rowsData.length === 0) return;
+    const sql = exportData(
+      { columns: slice.cols, rows: slice.rowsData, rowCount: slice.rowsData.length, duration: 0, success: true },
+      'sql-insert',
+      tableName,
+    );
+    try {
+      await navigator.clipboard.writeText(sql);
+      msg.success(t('table.copied'));
+    } catch {
+      msg.error(t('table.copyFailed'));
+    }
+  };
+
+  const deleteSelectedRows = () => {
+    const slice = getSelectedSlice();
+    if (!slice || slice.rowsData.length === 0) return;
+    const toDelete = new Set(slice.rowsData);
+    setRows((prev) => prev.filter((row) => !toDelete.has(row)));
+    setSelection(null);
+    anchorRef.current = null;
+  };
+
+  const handleCellContextMenu = (rowIdx: number, colIdx: number, e: ReactMouseEvent) => {
+    e.preventDefault();
+    if (!isCellSelected(rowIdx, colIdx)) {
+      anchorRef.current = { row: rowIdx, col: colIdx };
+      setSelection({ rowStart: rowIdx, rowEnd: rowIdx, colStart: colIdx, colEnd: colIdx });
+    }
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleRowHeaderContextMenu = (rowIdx: number, e: ReactMouseEvent) => {
+    e.preventDefault();
+    if (!isRowSelected(rowIdx)) selectRow(rowIdx);
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  // Ctrl/Cmd+C copies the selection as text
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'c') return;
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      if (!selRange || editingCell) return;
+      e.preventDefault();
+      copyAsText();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [selRange, editingCell, copyAsText]);
 
   const startEdit = (rowIdx: number, col: string) => {
     setEditingCell({ row: rowIdx, col });
@@ -208,7 +356,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </Button>
         <Button variant="ghost" size="icon" className="h-7 w-7"><Plus size={14} /></Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7"><Trash2 size={14} /></Button>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={deleteSelectedRows} disabled={!selRange}><Trash2 size={14} /></Button>
         <Button variant="ghost" size="icon" className="h-7 w-7"><Save size={14} /></Button>
         <div className="w-px h-5 bg-border" />
         <div className="relative flex-1 max-w-xs">
@@ -240,7 +388,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
       </div>
 
       {/* Table */}
-      <div ref={dragScrollRef} className="flex-1 overflow-auto min-h-0 cursor-grab">
+      <div ref={dragScrollRef} className="flex-1 overflow-auto min-h-0">
         {loading ? (
           <div className="flex items-center justify-center h-full">
             <RefreshCw size={24} className="animate-spin text-muted-foreground" />
@@ -250,37 +398,27 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
             {t('table.noData')}
           </div>
         ) : (
-          <table className="min-w-full text-xs border-collapse">
+          <table className="min-w-full text-xs border-collapse select-none">
             <thead className="sticky top-0 z-10">
               <tr className="bg-muted">
-                <th className="w-8 px-2 py-1.5 border-b border-r border-border text-center">
-                  <input
-                    type="checkbox"
-                    checked={selectedRows.size === pagedRows.length && pagedRows.length > 0}
-                    onChange={() => {
-                      if (selectedRows.size === pagedRows.length) setSelectedRows(new Set());
-                      else setSelectedRows(new Set(pagedRows.map((_, i) => i)));
-                    }}
-                    className="rounded"
-                  />
-                </th>
                 <th className="w-10 px-1 py-1.5 border-b border-r border-border text-center text-muted-foreground text-2xs">
                   #
                 </th>
-                {columns.map((col) => (
+                {columns.map((col, colIdx) => (
                   <th
                     key={col}
-                    className="px-2 py-1.5 border-b border-r border-border text-left cursor-pointer hover:bg-hover select-none whitespace-nowrap"
-                    onClick={() => handleSort(col)}
+                    className={`px-2 py-1.5 border-b border-r border-border text-left cursor-pointer select-none whitespace-nowrap ${
+                      selRange && colIdx >= selRange.colStart && colIdx <= selRange.colEnd ? 'bg-primary/15' : 'hover:bg-hover'
+                    }`}
+                    onDoubleClick={() => handleHeaderDoubleClick(colIdx)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      handleHeaderDoubleClick(colIdx);
+                      setContextMenu({ x: e.clientX, y: e.clientY });
+                    }}
+                    title={col}
                   >
-                    <div className="flex items-center gap-1">
-                      <span className="font-medium">{col}</span>
-                      {sortCol === col ? (
-                        sortDir === 'asc' ? <ArrowUp size={10} /> : <ArrowDown size={10} />
-                      ) : (
-                        <ArrowUpDown size={10} className="text-muted-foreground/50" />
-                      )}
-                    </div>
+                    <span className="font-medium">{col}</span>
                   </th>
                 ))}
               </tr>
@@ -289,23 +427,26 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
               {pagedRows.map((row, rowIdx) => (
                 <tr
                   key={rowIdx}
-                  className={`${selectedRows.has(rowIdx) ? 'bg-primary/10' : rowIdx % 2 === 0 ? '' : 'bg-muted/20'} hover:bg-hover/50`}
+                  className={`${isRowSelected(rowIdx) ? 'bg-primary/10' : rowIdx % 2 === 0 ? '' : 'bg-muted/20'} hover:bg-hover/50`}
                 >
-                  <td className="px-2 py-1 border-b border-r border-border text-center">
-                    <input
-                      type="checkbox"
-                      checked={selectedRows.has(rowIdx)}
-                      onChange={() => toggleRowSelection(rowIdx)}
-                      className="rounded"
-                    />
-                  </td>
-                  <td className="px-1 py-1 border-b border-r border-border text-center text-2xs text-muted-foreground">
+                  <td
+                    className={`px-1 py-1 border-b border-r border-border text-center text-2xs cursor-pointer ${
+                      isRowSelected(rowIdx) ? 'bg-primary/20 text-foreground' : 'text-muted-foreground hover:bg-hover'
+                    }`}
+                    onClick={(e) => selectRow(rowIdx, e.shiftKey)}
+                    onContextMenu={(e) => handleRowHeaderContextMenu(rowIdx, e)}
+                  >
                     {(currentPage - 1) * pageSize + rowIdx + 1}
                   </td>
-                  {columns.map((col) => (
+                  {columns.map((col, colIdx) => (
                     <td
                       key={col}
-                      className="px-2 py-1 border-b border-r border-border whitespace-nowrap max-w-[200px] truncate cursor-text"
+                      className={`px-2 py-1 border-b border-r border-border whitespace-nowrap max-w-[200px] truncate cursor-cell ${
+                        isCellSelected(rowIdx, colIdx) ? 'bg-primary/20' : ''
+                      }`}
+                      onMouseDown={(e) => handleCellMouseDown(rowIdx, colIdx, e)}
+                      onMouseEnter={() => handleCellMouseEnter(rowIdx, colIdx)}
+                      onContextMenu={(e) => handleCellContextMenu(rowIdx, colIdx, e)}
                       onDoubleClick={() => startEdit(rowIdx, col)}
                     >
                       {editingCell?.row === rowIdx && editingCell?.col === col ? (
@@ -370,6 +511,21 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
           </Button>
         </div>
       </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          items={[
+            { label: t('table.copyAsText'), icon: <Copy size={12} />, onClick: copyAsText, disabled: !selRange },
+            { label: t('table.copyAsSql'), icon: <FileCode2 size={12} />, onClick: copyAsSql, disabled: !selRange },
+            { separator: true, label: '' },
+            { label: t('table.deleteRows'), icon: <Trash2 size={12} />, onClick: deleteSelectedRows, danger: true, disabled: !selRange },
+          ]}
+        />
+      )}
     </div>
   );
 }

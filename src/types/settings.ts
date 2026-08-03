@@ -17,6 +17,7 @@ export interface EditorSettings {
   wordWrap: boolean;
   minimap: boolean;
   lineNumbers: boolean;
+  defaultPageSize: number;
 }
 
 export interface AIProvider {
@@ -137,6 +138,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     wordWrap: true,
     minimap: false,
     lineNumbers: true,
+    defaultPageSize: 50,
   },
   ai: {
     provider: 'openai',
