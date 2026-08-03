@@ -44,6 +44,7 @@
   --scrollbar-thumb: #cbd5e1;
   --scrollbar-track: transparent;
   --selection-bg: #dbeafe;
+  --selection: #dbeafe;
   --hover-bg: #f1f5f9;
   --hover: #f1f5f9;
   --active-bg: #e2e8f0;
@@ -95,6 +96,7 @@
   --scrollbar-thumb: #334155;
   --scrollbar-track: transparent;
   --selection-bg: #1e3a5f;
+  --selection: #1e3a5f;
   --hover-bg: #1e293b;
   --hover: #1e293b;
   --active-bg: #334155;

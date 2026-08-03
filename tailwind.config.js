@@ -57,6 +57,7 @@ export default {
           line: 'var(--editor-line)',
         },
         hover: 'var(--hover)',
+        selection: 'var(--selection)',
         success: 'var(--success)',
         warning: 'var(--warning)',
         info: 'var(--info)',
