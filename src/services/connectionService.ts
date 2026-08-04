@@ -261,6 +261,51 @@ export async function executeQuery(
   }
 }
 
+// Execute multiple SQL statements in batch (supports transactions)
+export async function executeBatch(
+  type: DatabaseType,
+  config: ConnectionConfig,
+  queries: string[],
+  database?: string,
+  useTransaction?: boolean
+): Promise<QueryResult[]> {
+  try {
+    const results = await invoke<{
+      columns: string[];
+      rows: Record<string, unknown>[];
+      row_count: number;
+      affected_rows: number;
+      duration: number;
+      success: boolean;
+      error: string | null;
+    }[]>('execute_batch', {
+      dbType: type,
+      config: config as Record<string, unknown>,
+      queries,
+      database: database ?? null,
+      useTransaction: useTransaction ?? false,
+    });
+    return results.map((r) => ({
+      columns: r.columns,
+      rows: r.rows,
+      rowCount: r.row_count,
+      affectedRows: r.affected_rows,
+      duration: r.duration,
+      success: r.success,
+      error: r.error ?? undefined,
+    }));
+  } catch (error) {
+    return [{
+      columns: [],
+      rows: [],
+      rowCount: 0,
+      duration: 0,
+      success: false,
+      error: String(error),
+    }];
+  }
+}
+
 // Get table structure (columns, indexes, foreign keys)
 export async function getTableStructure(
   type: DatabaseType,

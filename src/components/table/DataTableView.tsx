@@ -3,12 +3,13 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { executeQuery } from '../../services/connectionService';
+import { executeQuery, executeBatch, getTableStructure } from '../../services/connectionService';
 import { exportToFile, exportData, type ExportFormat } from '../../services/exportService';
 import { useDragScroll } from '../../hooks/useDragScroll';
 import { Button } from '../ui/Button';
 import { DropdownMenu, ContextMenu } from '../ui/DropdownMenu';
 import { useMessage } from '../ui/Message';
+import { Modal } from '../ui/Modal';
 import {
   RefreshCw,
   Plus,
@@ -22,6 +23,7 @@ import {
   Search,
   Copy,
   FileCode2,
+  X,
 } from 'lucide-react';
 
 interface DataTableViewProps {
@@ -61,6 +63,10 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   const countCacheRef = useRef<number | null>(null);
   useEffect(() => {
     countCacheRef.current = null;
+    setCellChanges(new Map());
+    setDeletedIndices(new Set());
+    setNewRows([]);
+    setEditingCell(null);
   }, [tableName, database, connectionId]);
 
   const [columns, setColumns] = useState<string[]>([]);
@@ -91,6 +97,31 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   // Editing
   const [editingCell, setEditingCell] = useState<{ row: number; col: string } | null>(null);
   const [editValue, setEditValue] = useState('');
+
+  // Changeset tracking for data writeback
+  const [primaryKeys, setPrimaryKeys] = useState<string[]>([]);
+  const [cellChanges, setCellChanges] = useState<Map<number, Map<string, unknown>>>(new Map());
+  const [deletedIndices, setDeletedIndices] = useState<Set<number>>(new Set());
+  const [newRows, setNewRows] = useState<RowData[]>([]);
+  const [previewSql, setPreviewSql] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [autoCommit, setAutoCommit] = useState(true);
+
+  // Cell value viewer (for NULL/BLOB/long text)
+  const [cellViewer, setCellViewer] = useState<{ col: string; value: string; type: string } | null>(null);
+
+  // Fetch primary key columns for SQL generation
+  useEffect(() => {
+    if (!conn || !tableName || !database || isNoSql) {
+      setPrimaryKeys([]);
+      return;
+    }
+    getTableStructure(conn.type, conn.config, database, tableName)
+      .then((struct) => {
+        setPrimaryKeys(struct.columns.filter((c) => c.primary_key).map((c) => c.name));
+      })
+      .catch(() => setPrimaryKeys([]));
+  }, [conn, tableName, database, isNoSql]);
 
   const fetchData = useCallback(async (forceCount = false) => {
     if (!conn) {
@@ -308,12 +339,86 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   };
 
   const deleteSelectedRows = () => {
-    const slice = getSelectedSlice();
-    if (!slice || slice.rowsData.length === 0) return;
-    const toDelete = new Set(slice.rowsData);
-    setRows((prev) => prev.filter((row) => !toDelete.has(row)));
+    if (!selRange) return;
+    const newDeleted = new Set(deletedIndices);
+    for (let i = selRange.rowStart; i <= selRange.rowEnd; i++) {
+      if (i < rows.length) newDeleted.add(i);
+    }
+    setDeletedIndices(newDeleted);
     setSelection(null);
     anchorRef.current = null;
+  };
+
+  const addNewRow = () => {
+    const emptyRow: RowData = {};
+    columns.forEach((col) => { emptyRow[col] = null; });
+    setNewRows((prev) => [...prev, emptyRow]);
+    setTotalRows((prev) => prev + 1);
+  };
+
+  const pendingCount = cellChanges.size + deletedIndices.size + newRows.length;
+
+  const formatSqlValue = (val: unknown): string => {
+    if (val === null || val === undefined) return 'NULL';
+    if (typeof val === 'number') return String(val);
+    if (typeof val === 'boolean') return conn?.type === 'postgresql' ? String(val) : (val ? '1' : '0');
+    const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+    return "'" + str.replace(/'/g, "''") + "'";
+  };
+
+  const buildWhereClause = (row: RowData): string => {
+    if (primaryKeys.length === 0) return '1=1 /* no PK */';
+    return primaryKeys.map((pk) => {
+      const v = row[pk];
+      return v === null || v === undefined ? `${quoteIdent(pk)} IS NULL` : `${quoteIdent(pk)} = ${formatSqlValue(v)}`;
+    }).join(' AND ');
+  };
+
+  const generatePreviewSql = (): string => {
+    const stmts: string[] = [];
+    const ident = quoteIdent(tableName);
+    deletedIndices.forEach((idx) => {
+      stmts.push(`DELETE FROM ${ident} WHERE ${buildWhereClause(rows[idx])};`);
+    });
+    cellChanges.forEach((colMap, idx) => {
+      if (deletedIndices.has(idx)) return;
+      const sets: string[] = [];
+      colMap.forEach((val, col) => { sets.push(`${quoteIdent(col)} = ${formatSqlValue(val)}`); });
+      if (sets.length > 0) stmts.push(`UPDATE ${ident} SET ${sets.join(', ')} WHERE ${buildWhereClause(rows[idx])};`);
+    });
+    newRows.forEach((row) => {
+      const cols = columns.map((c) => quoteIdent(c));
+      const vals = columns.map((c) => formatSqlValue(row[c]));
+      stmts.push(`INSERT INTO ${ident} (${cols.join(', ')}) VALUES (${vals.join(', ')});`);
+    });
+    return stmts.join('\n');
+  };
+
+  const openPreview = () => {
+    const sql = generatePreviewSql();
+    if (!sql) { msg.info(t('table.noChanges')); return; }
+    setPreviewSql(sql);
+  };
+
+  const applyChanges = async () => {
+    if (!conn || !previewSql) return;
+    setApplying(true);
+    const statements = previewSql.split(';').map((s) => s.trim()).filter((s) => s.length > 0);
+    try {
+      const results = await executeBatch(conn.type, conn.config, statements, database, !autoCommit);
+      const failures = results.filter((r) => !r.success);
+      if (failures.length === 0) {
+        msg.success(t('table.applySuccess', { count: results.length }));
+        setPreviewSql(null);
+        fetchData(true);
+      } else {
+        msg.error(t('table.applyPartial', { success: results.length - failures.length, failed: failures.length }) + ': ' + (failures[0].error || 'Unknown'));
+      }
+    } catch (err) {
+      msg.error(String(err));
+    } finally {
+      setApplying(false);
+    }
   };
 
   const handleCellContextMenu = (rowIdx: number, colIdx: number, e: ReactMouseEvent) => {
@@ -353,11 +458,16 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   const commitEdit = () => {
     if (!editingCell) return;
     const { row, col } = editingCell;
-    setRows((prev) => {
-      const next = [...prev];
-      if (next[row]) next[row] = { ...next[row], [col]: editValue };
-      return next;
-    });
+    const original = rows[row];
+    if (original && String(original[col]) !== editValue) {
+      setCellChanges((prev) => {
+        const next = new Map(prev);
+        const colMap = new Map(next.get(row) || []);
+        colMap.set(col, editValue);
+        next.set(row, colMap);
+        return next;
+      });
+    }
     setEditingCell(null);
   };
 
@@ -410,9 +520,21 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => fetchData(true)} disabled={loading}>
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7"><Plus size={14} /></Button>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={addNewRow}><Plus size={14} /></Button>
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={deleteSelectedRows} disabled={!selRange}><Trash2 size={14} /></Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7"><Save size={14} /></Button>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openPreview} disabled={pendingCount === 0}>
+          <Save size={14} />
+        </Button>
+        {pendingCount > 0 && (
+          <span className="text-2xs text-amber-500 dark:text-amber-400 font-medium">
+            {t('table.pendingChanges', { count: pendingCount })}
+          </span>
+        )}
+        <div className="w-px h-5 bg-border" />
+        <label className="flex items-center gap-1 text-2xs text-muted-foreground cursor-pointer select-none" title={t('table.autoCommitHint')}>
+          <input type="checkbox" checked={autoCommit} onChange={(e) => setAutoCommit(e.target.checked)} className="rounded border-border" />
+          {t('table.autoCommit')}
+        </label>
         <div className="w-px h-5 bg-border" />
         <div className="relative flex-1 max-w-xs">
           <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -440,7 +562,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
           trigger={<Button variant="ghost" size="icon" className="h-7 w-7" disabled={exporting}><ArrowDownToLine size={14} className={exporting ? 'animate-pulse' : ''} /></Button>}
         />
         <span className="text-2xs text-muted-foreground">
-          {totalRows} {t('table.rows')} · {duration} {t('editor.ms')}
+          {totalRows + newRows.length} {t('table.rows')} · {duration} {t('editor.ms')}
         </span>
       </div>
 
@@ -505,7 +627,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
               {pagedRows.map((row, rowIdx) => (
                 <tr
                   key={rowIdx}
-                  className={`${isFullRowSelected(rowIdx) ? 'bg-selection' : rowIdx % 2 === 0 ? '' : 'bg-muted/20'} hover:bg-hover/50`}
+                  className={`${deletedIndices.has(rowIdx) ? 'opacity-40 line-through' : isFullRowSelected(rowIdx) ? 'bg-selection' : rowIdx % 2 === 0 ? '' : 'bg-muted/20'} hover:bg-hover/50`}
                 >
                   <td
                     className={`px-1 py-1 border-b border-r border-border text-center text-2xs cursor-pointer ${
@@ -520,13 +642,26 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
                     <td
                       key={col}
                       className={`px-2 py-1 border-b border-r border-border whitespace-nowrap max-w-[200px] truncate cursor-cell ${
-                        isCellSelected(rowIdx, colIdx) ? 'bg-selection' : ''
+                        deletedIndices.has(rowIdx) ? '' :
+                        isCellSelected(rowIdx, colIdx) ? 'bg-selection' :
+                        cellChanges.get(rowIdx)?.has(col) ? 'bg-amber-100 dark:bg-amber-900/30' : ''
                       }`}
                       data-row={rowIdx}
                       data-col={colIdx}
                       onMouseDown={(e) => handleCellMouseDown(rowIdx, colIdx, e)}
                       onContextMenu={(e) => handleCellContextMenu(rowIdx, colIdx, e)}
-                      onDoubleClick={() => startEdit(rowIdx, col)}
+                      onDoubleClick={() => {
+                        const val = row[col];
+                        const str = val === null || val === undefined ? '' : typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val);
+                        const isBlob = typeof val === 'string' && val.startsWith('<blob ');
+                        const isLong = str.length > 100;
+                        const isJson = typeof val === 'object' || (typeof val === 'string' && (val.startsWith('{') || val.startsWith('[')));
+                        if (isBlob || isLong || isJson || val === null) {
+                          setCellViewer({ col, value: val === null ? 'NULL' : str, type: isBlob ? 'blob' : isJson ? 'json' : 'text' });
+                        } else {
+                          startEdit(rowIdx, col);
+                        }
+                      }}
                     >
                       {editingCell?.row === rowIdx && editingCell?.col === col ? (
                         <input
@@ -546,6 +681,25 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
                           {row[col] === null ? 'NULL' : String(row[col])}
                         </span>
                       )}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {newRows.map((_row, idx) => (
+                <tr key={`new-${idx}`} className="bg-green-50 dark:bg-green-950/20 hover:bg-green-100 dark:hover:bg-green-950/30">
+                  <td className="px-1 py-1 border-b border-r border-border text-center text-2xs text-green-600 dark:text-green-400 font-medium">
+                    +
+                  </td>
+                  {columns.map((col, colIdx) => (
+                    <td
+                      key={col}
+                      className="px-2 py-1 border-b border-r border-border whitespace-nowrap max-w-[200px] truncate cursor-cell"
+                      data-row={rows.length + idx}
+                      data-col={colIdx}
+                      onMouseDown={(e) => handleCellMouseDown(rows.length + idx, colIdx, e)}
+                      onDoubleClick={() => startEdit(rows.length + idx, col)}
+                    >
+                      <span className="text-muted-foreground italic">NULL</span>
                     </td>
                   ))}
                 </tr>
@@ -590,6 +744,35 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
           </Button>
         </div>
       </div>
+
+      {/* Cell Value Viewer Modal */}
+      <Modal open={cellViewer !== null} onClose={() => setCellViewer(null)} title={cellViewer ? `${cellViewer.col} (${cellViewer.type})` : ''} width="max-w-2xl">
+        {cellViewer && (
+          <div className="p-4">
+            <pre className="text-xs bg-background rounded p-3 overflow-auto max-h-[60vh] font-mono whitespace-pre-wrap border border-border">
+              {cellViewer.value}
+            </pre>
+          </div>
+        )}
+      </Modal>
+
+      {/* Preview SQL Modal */}
+      <Modal open={previewSql !== null} onClose={() => setPreviewSql(null)} title={t('table.previewChanges')} width="max-w-3xl">
+        <div className="p-4 space-y-3">
+          <pre className="text-xs bg-background rounded p-3 overflow-auto max-h-[50vh] font-mono whitespace-pre-wrap border border-border">
+            {previewSql}
+          </pre>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setPreviewSql(null)}>
+              <X size={14} className="mr-1" />{t('common.cancel')}
+            </Button>
+            <Button size="sm" onClick={applyChanges} disabled={applying}>
+              <Save size={14} className="mr-1" />
+              {applying ? t('table.applying') : t('table.applyChanges')}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Context menu */}
       {contextMenu && (

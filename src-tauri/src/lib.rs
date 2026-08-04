@@ -2,7 +2,7 @@ mod conn_manager;
 mod db;
 
 use db::{
-    list_databases_impl, test_connection_impl, execute_query_impl,
+    list_databases_impl, test_connection_impl, execute_query_impl, execute_batch_impl,
     get_table_structure_impl, get_er_data_impl, get_table_ddl_impl,
     redis_scan_keys_impl, redis_get_key_impl, redis_delete_key_impl, redis_set_key_impl,
     DatabaseResult, QueryResultData, TableStructureData, ERDiagramData,
@@ -29,6 +29,17 @@ async fn execute_query(
     database: Option<String>,
 ) -> Result<QueryResultData, String> {
     execute_query_impl(&db_type, config, query, database).await
+}
+
+#[tauri::command]
+async fn execute_batch(
+    db_type: String,
+    config: serde_json::Value,
+    queries: Vec<String>,
+    database: Option<String>,
+    use_transaction: bool,
+) -> Result<Vec<QueryResultData>, String> {
+    execute_batch_impl(&db_type, config, queries, database, use_transaction).await
 }
 
 #[tauri::command]
@@ -111,6 +122,7 @@ pub fn run() {
             test_connection,
             list_databases,
             execute_query,
+            execute_batch,
             get_table_structure,
             get_er_data,
             get_table_ddl,

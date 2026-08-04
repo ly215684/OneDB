@@ -230,7 +230,16 @@
     "import": "Import",
     "filterBar": "Filter Bar",
     "whereClause": "WHERE Clause",
-    "orderByClause": "ORDER BY Clause"
+    "orderByClause": "ORDER BY Clause",
+    "previewChanges": "Preview Changes SQL",
+    "applyChanges": "Apply Changes",
+    "applying": "Applying...",
+    "pendingChanges": "{{count}} pending",
+    "noChanges": "No pending changes",
+    "applySuccess": "Successfully executed {{count}} statements",
+    "applyPartial": "{{success}} succeeded, {{failed}} failed",
+    "autoCommit": "Auto Commit",
+    "autoCommitHint": "When disabled, all changes execute in a single transaction"
   },
   "structure": {
     "columns": "Columns",

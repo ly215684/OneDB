@@ -2570,3 +2570,309 @@ async fn get_ddl_duckdb(config: &serde_json::Value, table: &str) -> Result<Strin
 
     Ok(result)
 }
+
+// ─── Batch execution (for transactions) ───────────────────────────
+
+pub async fn execute_batch_impl(
+    db_type: &str,
+    config: serde_json::Value,
+    queries: Vec<String>,
+    database: Option<String>,
+    use_transaction: bool,
+) -> Result<Vec<QueryResultData>, String> {
+    match db_type {
+        "mysql" | "mariadb" => batch_mysql(&config, queries, database.as_deref(), use_transaction).await,
+        "postgresql" => batch_postgresql(&config, queries, database.as_deref(), use_transaction).await,
+        "sqlite" => batch_sqlite(&config, queries, use_transaction).await,
+        "duckdb" => batch_duckdb(&config, queries, use_transaction).await,
+        _ => Err(format!("Transactions not supported for: {}", db_type)),
+    }
+}
+
+async fn batch_mysql(
+    config: &serde_json::Value,
+    queries: Vec<String>,
+    database: Option<&str>,
+    use_transaction: bool,
+) -> Result<Vec<QueryResultData>, String> {
+    let pool = mysql_pool(config, database).await?;
+    let mut conn = pool.get_conn().await.map_err(e_str)?;
+    let mut results = Vec::new();
+
+    if use_transaction {
+        conn.query_iter("BEGIN").await.map_err(e_str)?;
+    }
+
+    for query in &queries {
+        let start = std::time::Instant::now();
+        match conn.query_iter(query).await {
+            Ok(mut result) => {
+                let columns: Vec<String> = result
+                    .columns()
+                    .map(|cols| cols.iter().map(|c| c.name_str().to_string()).collect())
+                    .unwrap_or_default();
+                let mut rows = Vec::new();
+                let result_set: Vec<mysql_async::Row> = result.collect().await.map_err(e_str)?;
+                for mut row in result_set {
+                    let mut json_row = serde_json::Map::new();
+                    for (i, col) in columns.iter().enumerate() {
+                        let val = row.take(i).unwrap_or(mysql_async::Value::NULL);
+                        json_row.insert(col.clone(), mysql_val_to_json(val));
+                    }
+                    rows.push(serde_json::Value::Object(json_row));
+                }
+                let affected = conn.affected_rows();
+                results.push(QueryResultData {
+                    row_count: rows.len(),
+                    affected_rows: affected,
+                    duration: start.elapsed().as_millis() as u64,
+                    success: true,
+                    error: None,
+                    columns,
+                    rows,
+                });
+            }
+            Err(e) => {
+                if use_transaction {
+                    let _ = conn.query_iter("ROLLBACK").await;
+                }
+                return Err(e_str(e));
+            }
+        }
+    }
+
+    if use_transaction {
+        conn.query_iter("COMMIT").await.map_err(e_str)?;
+    }
+    Ok(results)
+}
+
+async fn batch_postgresql(
+    config: &serde_json::Value,
+    queries: Vec<String>,
+    database: Option<&str>,
+    use_transaction: bool,
+) -> Result<Vec<QueryResultData>, String> {
+    let db_override: Option<String> = match database {
+        Some(db) if !db.is_empty() => Some(db.to_string()),
+        Some(_) => Some("postgres".to_string()),
+        None => {
+            let cfg_db = config["database"].as_str().unwrap_or("");
+            if cfg_db.is_empty() { Some("postgres".to_string()) } else { None }
+        }
+    };
+    let client = pg_client(config, db_override.as_deref()).await?;
+    let mut results = Vec::new();
+
+    if use_transaction {
+        client.execute("BEGIN", &[]).await.map_err(e_str)?;
+    }
+
+    for query in &queries {
+        let start = std::time::Instant::now();
+        let stmt = client.prepare(query).await.map_err(e_str)?;
+        if !stmt.columns().is_empty() {
+            let rows = client.query(&stmt, &[]).await.map_err(e_str)?;
+            let columns: Vec<String> = stmt.columns().iter().map(|c| c.name().to_string()).collect();
+            let mut json_rows = Vec::new();
+            for row in &rows {
+                let mut json_row = serde_json::Map::new();
+                for (i, col) in columns.iter().enumerate() {
+                    let v: Option<String> = row.try_get(i).ok();
+                    json_row.insert(col.clone(), v.map(serde_json::Value::String).unwrap_or(serde_json::Value::Null));
+                }
+                json_rows.push(serde_json::Value::Object(json_row));
+            }
+            results.push(QueryResultData {
+                row_count: json_rows.len(),
+                affected_rows: 0,
+                duration: start.elapsed().as_millis() as u64,
+                success: true,
+                error: None,
+                columns,
+                rows: json_rows,
+            });
+        } else {
+            let affected = client.execute(&stmt, &[]).await.map_err(e_str)?;
+            results.push(QueryResultData {
+                columns: vec![],
+                rows: vec![],
+                row_count: 0,
+                affected_rows: affected,
+                duration: start.elapsed().as_millis() as u64,
+                success: true,
+                error: None,
+            });
+        }
+    }
+
+    if use_transaction {
+        client.execute("COMMIT", &[]).await.map_err(e_str)?;
+    }
+    Ok(results)
+}
+
+async fn batch_sqlite(
+    config: &serde_json::Value,
+    queries: Vec<String>,
+    use_transaction: bool,
+) -> Result<Vec<QueryResultData>, String> {
+    let path = config["filePath"]
+        .as_str()
+        .ok_or("File path is required")?
+        .to_string();
+
+    tokio::task::spawn_blocking(move || -> Result<Vec<QueryResultData>, String> {
+        let conn = rusqlite::Connection::open(&path).map_err(e_str)?;
+        let mut results = Vec::new();
+
+        if use_transaction {
+            conn.execute_batch("BEGIN").map_err(e_str)?;
+        }
+
+        for query in &queries {
+            let start = std::time::Instant::now();
+            let mut stmt = conn.prepare(query).map_err(e_str)?;
+            if stmt.column_count() > 0 {
+                let columns: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+                let column_count = columns.len();
+                let rows_iter = stmt.query_map([], |row| {
+                    let mut map = serde_json::Map::new();
+                    for i in 0..column_count {
+                        let val: rusqlite::types::Value = row.get(i)?;
+                        let json_val = match val {
+                            rusqlite::types::Value::Null => serde_json::Value::Null,
+                            rusqlite::types::Value::Integer(i) => serde_json::Value::Number(i.into()),
+                            rusqlite::types::Value::Real(f) => serde_json::Number::from_f64(f)
+                                .map(serde_json::Value::Number)
+                                .unwrap_or(serde_json::Value::Null),
+                            rusqlite::types::Value::Text(s) => serde_json::Value::String(s),
+                            rusqlite::types::Value::Blob(b) => serde_json::Value::String(format!("<blob {}B>", b.len())),
+                        };
+                        map.insert(columns[i].clone(), json_val);
+                    }
+                    Ok(serde_json::Value::Object(map))
+                }).map_err(e_str)?;
+                let mut rows = Vec::new();
+                for row in rows_iter {
+                    if let Ok(r) = row { rows.push(r); }
+                }
+                results.push(QueryResultData {
+                    row_count: rows.len(),
+                    affected_rows: 0,
+                    duration: start.elapsed().as_millis() as u64,
+                    success: true,
+                    error: None,
+                    columns,
+                    rows,
+                });
+            } else {
+                drop(stmt);
+                let affected = conn.execute(query, []).map_err(e_str)?;
+                results.push(QueryResultData {
+                    columns: vec![],
+                    rows: vec![],
+                    row_count: 0,
+                    affected_rows: affected as u64,
+                    duration: start.elapsed().as_millis() as u64,
+                    success: true,
+                    error: None,
+                });
+            }
+        }
+
+        if use_transaction {
+            conn.execute_batch("COMMIT").map_err(e_str)?;
+        }
+        Ok(results)
+    })
+    .await
+    .map_err(e_str)?
+}
+
+async fn batch_duckdb(
+    config: &serde_json::Value,
+    queries: Vec<String>,
+    use_transaction: bool,
+) -> Result<Vec<QueryResultData>, String> {
+    let path = config["filePath"]
+        .as_str()
+        .ok_or("File path is required")?
+        .to_string();
+
+    tokio::task::spawn_blocking(move || -> Result<Vec<QueryResultData>, String> {
+        let conn = duckdb::Connection::open(&path).map_err(e_str)?;
+        let mut results = Vec::new();
+
+        if use_transaction {
+            conn.execute_batch("BEGIN").map_err(e_str)?;
+        }
+
+        for query in &queries {
+            let start = std::time::Instant::now();
+            match conn.prepare(query) {
+                Ok(mut stmt) if stmt.column_count() > 0 => {
+                    let columns: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+                    let column_count = columns.len();
+                    let rows_iter = stmt.query_map([], |row| {
+                        let mut map = serde_json::Map::new();
+                        for i in 0..column_count {
+                            let val: duckdb::types::Value = row.get(i).map_err(|e| duckdb::Error::FromSqlConversionFailure(i, duckdb::types::Type::Null, Box::new(e)))?;
+                            let json_val = match val {
+                                duckdb::types::Value::Null => serde_json::Value::Null,
+                                duckdb::types::Value::Boolean(b) => serde_json::Value::Bool(b),
+                                duckdb::types::Value::TinyInt(i) => serde_json::Value::Number(i.into()),
+                                duckdb::types::Value::SmallInt(i) => serde_json::Value::Number(i.into()),
+                                duckdb::types::Value::Int(i) => serde_json::Value::Number(i.into()),
+                                duckdb::types::Value::BigInt(i) => serde_json::Value::Number(i.into()),
+                                duckdb::types::Value::UTinyInt(i) => serde_json::Value::Number(i.into()),
+                                duckdb::types::Value::USmallInt(i) => serde_json::Value::Number(i.into()),
+                                duckdb::types::Value::UInt(i) => serde_json::Value::Number(i.into()),
+                                duckdb::types::Value::UBigInt(i) => serde_json::Value::Number(i.into()),
+                                duckdb::types::Value::Float(f) => serde_json::Number::from_f64(f as f64).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
+                                duckdb::types::Value::Double(f) => serde_json::Number::from_f64(f).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
+                                duckdb::types::Value::Text(s) => serde_json::Value::String(s),
+                                duckdb::types::Value::Blob(b) => serde_json::Value::String(format!("<blob {}B>", b.len())),
+                                _ => serde_json::Value::String(format!("{:?}", val)),
+                            };
+                            map.insert(columns[i].clone(), json_val);
+                        }
+                        Ok(serde_json::Value::Object(map))
+                    }).map_err(e_str)?;
+                    let mut rows = Vec::new();
+                    for row in rows_iter {
+                        if let Ok(r) = row { rows.push(r); }
+                    }
+                    results.push(QueryResultData {
+                        row_count: rows.len(),
+                        affected_rows: 0,
+                        duration: start.elapsed().as_millis() as u64,
+                        success: true,
+                        error: None,
+                        columns,
+                        rows,
+                    });
+                }
+                _ => {
+                    let affected = conn.execute(query, []).map_err(e_str)?;
+                    results.push(QueryResultData {
+                        columns: vec![],
+                        rows: vec![],
+                        row_count: 0,
+                        affected_rows: affected as u64,
+                        duration: start.elapsed().as_millis() as u64,
+                        success: true,
+                        error: None,
+                    });
+                }
+            }
+        }
+
+        if use_transaction {
+            conn.execute_batch("COMMIT").map_err(e_str)?;
+        }
+        Ok(results)
+    })
+    .await
+    .map_err(e_str)?
+}

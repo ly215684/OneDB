@@ -230,7 +230,16 @@
     "import": "导入",
     "filterBar": "筛选栏",
     "whereClause": "WHERE 条件",
-    "orderByClause": "ORDER BY 排序"
+    "orderByClause": "ORDER BY 排序",
+    "previewChanges": "预览变更 SQL",
+    "applyChanges": "执行变更",
+    "applying": "执行中...",
+    "pendingChanges": "{{count}} 项待提交",
+    "noChanges": "没有待提交的变更",
+    "applySuccess": "成功执行 {{count}} 条语句",
+    "applyPartial": "{{success}} 条成功，{{failed}} 条失败",
+    "autoCommit": "自动提交",
+    "autoCommitHint": "关闭后将使用事务模式，所有变更在同一个事务中执行"
   },
   "structure": {
     "columns": "字段",
