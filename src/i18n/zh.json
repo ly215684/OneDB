@@ -103,6 +103,7 @@
         "colorCyan": "青色",
         "colorPink": "粉色",
         "colorTeal": "蓝绿色",
+    "customColor": "自定义颜色",
     "testConnection": "测试连接",
     "testing": "连接中...",
     "save": "保存",

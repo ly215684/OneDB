@@ -103,6 +103,7 @@
         "colorCyan": "Cyan",
         "colorPink": "Pink",
         "colorTeal": "Teal",
+    "customColor": "Custom Color",
     "testConnection": "Test Connection",
     "testing": "Connecting...",
     "save": "Save",

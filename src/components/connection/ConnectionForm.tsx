@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Connection, ConnectionConfig, DatabaseType } from '../../types/connection';
 import { DEFAULT_PORTS, COLOR_OPTIONS, DATABASE_TYPES } from '../../types/connection';
@@ -6,7 +6,7 @@ import { parseConnectionUrl, validateConnectionConfig, testConnection } from '..
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Tabs } from '../ui/Tabs';
-import { ArrowLeft, Link, FileText, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
+import { ArrowLeft, Link, FileText, AlertCircle, CheckCircle, XCircle, Plus } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useSettingsStore } from '../../stores/settingsStore';
 
@@ -35,6 +35,29 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
   const [urlString, setUrlString] = useState(connection?.config?.connectionString || '');
   const [connName, setConnName] = useState(connection?.name || `${dbInfo.name} Connection`);
   const [color, setColor] = useState(connection?.color || COLOR_OPTIONS[0].value);
+  const [hexInput, setHexInput] = useState(color);
+  const colorPickerRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setHexInput(color);
+  }, [color]);
+
+  const isCustomColor = !COLOR_OPTIONS.some((o) => o.value.toLowerCase() === color.toLowerCase());
+
+  const expandHex = (v: string) => {
+    if (/^#[0-9a-fA-F]{3}$/.test(v)) {
+      return '#' + v.slice(1).split('').map((c) => c + c).join('');
+    }
+    return v;
+  };
+
+  const handleHexInputChange = (value: string) => {
+    setHexInput(value);
+    const v = value.trim();
+    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v)) {
+      setColor(expandHex(v).toLowerCase());
+    }
+  };
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
@@ -253,7 +276,7 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
         {/* Color Mark */}
         <div className="flex flex-col gap-2">
           <label className="text-xs text-muted-foreground font-medium">{t('connection.colorMark')}</label>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             {COLOR_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
@@ -266,6 +289,35 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
                 title={t(opt.name)}
               />
             ))}
+            {/* Custom color picker */}
+            <button
+              onClick={() => colorPickerRef.current?.click()}
+              className={clsx(
+                'w-6 h-6 rounded-full transition-all flex items-center justify-center border border-border',
+                isCustomColor ? 'ring-2 ring-offset-2 ring-offset-background ring-ring scale-110' : 'hover:scale-110'
+              )}
+              style={{ background: 'conic-gradient(#ef4444, #f59e0b, #22c55e, #06b6d4, #3b82f6, #a855f7, #ef4444)' }}
+              title={t('connection.customColor')}
+            >
+              <Plus size={12} className="text-white drop-shadow-sm" />
+            </button>
+            <input
+              ref={colorPickerRef}
+              type="color"
+              value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : '#3b82f6'}
+              onChange={(e) => setColor(e.target.value.toLowerCase())}
+              className="sr-only pointer-events-none absolute w-0 h-0 opacity-0"
+              tabIndex={-1}
+            />
+            <input
+              value={hexInput}
+              onChange={(e) => handleHexInputChange(e.target.value)}
+              onBlur={() => setHexInput(color)}
+              className="w-24 px-2 py-1 text-xs rounded-md border border-border bg-background text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder="#3b82f6"
+              maxLength={7}
+              spellCheck={false}
+            />
           </div>
         </div>
 
