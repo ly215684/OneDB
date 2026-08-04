@@ -24,7 +24,7 @@ impl russh::client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        _public_key: &[u8],
+        _public_key: &russh_keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true) // Accept any server key for desktop client
     }
@@ -48,9 +48,10 @@ pub async fn open_tunnel(
     let config = Arc::new(config);
 
     // Connect to SSH server
-    let mut session = russh::client::connect(config, (ssh_host, ssh_port), ClientHandler)
+    let session = russh::client::connect(config, (ssh_host, ssh_port), ClientHandler)
         .await
         .map_err(|e| format!("SSH connect failed: {}", e))?;
+    let session = Arc::new(session);
 
     // Authenticate
     let mut authenticated = false;
@@ -120,7 +121,7 @@ pub async fn open_tunnel(
 /// Forward a single TCP connection through an SSH channel to the remote host.
 async fn forward_connection(
     mut tcp: tokio::net::TcpStream,
-    session: Arc<russh::Handle>,
+    session: Arc<russh::client::Handle<ClientHandler>>,
     remote_host: &str,
     remote_port: u16,
 ) -> Result<(), String> {
