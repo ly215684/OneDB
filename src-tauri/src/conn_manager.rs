@@ -25,6 +25,8 @@ pub enum ConnKind {
 struct Entry {
     kind: ConnKind,
     last_used: Mutex<u64>,
+    #[allow(dead_code)]
+    tunnel: Option<crate::ssh_tunnel::SSHTunnel>,
 }
 
 fn now_ms() -> u64 {
@@ -75,6 +77,7 @@ fn touch(entry: &Entry) {
 /// Get or create a MySQL connection pool for the given config.
 pub async fn get_mysql_pool(
     key: &str,
+    tunnel: Option<crate::ssh_tunnel::SSHTunnel>,
     build: impl FnOnce() -> Result<mysql_async::Pool, String>,
 ) -> Result<mysql_async::Pool, String> {
     if let Some(entry) = manager().get(key) {
@@ -89,6 +92,7 @@ pub async fn get_mysql_pool(
         Arc::new(Entry {
             kind: ConnKind::MySql(pool.clone()),
             last_used: Mutex::new(now_ms()),
+            tunnel,
         }),
     );
     Ok(pool)
@@ -98,6 +102,7 @@ pub async fn get_mysql_pool(
 /// client has been closed.
 pub async fn get_pg_client(
     key: &str,
+    tunnel: Option<crate::ssh_tunnel::SSHTunnel>,
     build: impl Fn() -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<tokio_postgres::Client, String>> + Send>,
     >,
@@ -119,6 +124,7 @@ pub async fn get_pg_client(
         Arc::new(Entry {
             kind: ConnKind::Pg(arc.clone()),
             last_used: Mutex::new(now_ms()),
+            tunnel,
         }),
     );
     Ok(arc)
@@ -141,6 +147,7 @@ pub async fn get_redis_conn(
         Arc::new(Entry {
             kind: ConnKind::Redis(con.clone()),
             last_used: Mutex::new(now_ms()),
+            tunnel: None,
         }),
     );
     Ok(con)
@@ -163,6 +170,7 @@ pub async fn get_mongo_client(
         Arc::new(Entry {
             kind: ConnKind::Mongo(client.clone()),
             last_used: Mutex::new(now_ms()),
+            tunnel: None,
         }),
     );
     Ok(client)

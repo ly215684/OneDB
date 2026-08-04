@@ -38,6 +38,9 @@ import {
   Eraser,
   Loader2,
   BotOff,
+  Star,
+  FolderOpen,
+  Shield,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { ScrollArea } from '../components/ui/ScrollArea';
@@ -58,6 +61,10 @@ export function Sidebar({ width = 260 }: SidebarProps) {
   const duplicateConnection = useConnectionStore((s) => s.duplicateConnection);
   const getConnection = useConnectionStore((s) => s.getConnection);
   const toggleAIDisabled = useConnectionStore((s) => s.toggleAIDisabled);
+  const toggleFavorite = useConnectionStore((s) => s.toggleFavorite);
+  const setConnectionGroup = useConnectionStore((s) => s.setConnectionGroup);
+  const toggleReadOnly = useConnectionStore((s) => s.toggleReadOnly);
+  const getAllGroups = useConnectionStore((s) => s.getAllGroups);
   const addTab = useTabStore((s) => s.addTab);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -69,6 +76,7 @@ export function Sidebar({ width = 260 }: SidebarProps) {
   const [connDialogOpen, setConnDialogOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<import('../types/connection').Connection | null>(null);
   const [loadingTable, setLoadingTable] = useState<{ connId: string; dbName: string; tableName: string } | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
   const toggleConnection = (id: string) => {
     setExpandedConnections((prev) => {
@@ -579,10 +587,128 @@ export function Sidebar({ width = 260 }: SidebarProps) {
   };
 
   // Group connections by type
+  const favoriteConns = filteredConnections.filter((c) => c.favorite);
+  const allGroups = getAllGroups();
   const groupedConnections = DATABASE_TYPES.map((dbType) => ({
     ...dbType,
-    connections: filteredConnections.filter((c) => c.type === dbType.type),
+    connections: filteredConnections.filter((c) => c.type === dbType.type && !c.group),
   })).filter((group) => group.connections.length > 0);
+
+  const toggleFolder = (key: string) => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // Render a single connection item with its expanded tree
+  const renderConnection = (conn: import('../types/connection').Connection) => (
+    <div key={conn.id}>
+      <div
+        className="flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-hover rounded-sm mx-1 group min-w-0"
+        onContextMenu={(e) => handleContextMenu(e, conn.id)}
+        onClick={() => toggleConnection(conn.id)}
+        onDoubleClick={() => handleDoubleClick(conn.id)}
+      >
+        <span
+          className="w-2 h-2 rounded-full flex-shrink-0"
+          style={{ backgroundColor: conn.color || '#3b82f6' }}
+        />
+        {expandedConnections.has(conn.id) ? (
+          <ChevronDown size={12} className="text-muted-foreground flex-shrink-0" />
+        ) : (
+          <ChevronRight size={12} className="text-muted-foreground flex-shrink-0" />
+        )}
+        <span
+          className="text-2xs font-bold px-1 py-0 rounded flex-shrink-0"
+          style={{ color: dbTypeBadge(conn.type).color, backgroundColor: `${dbTypeBadge(conn.type).color}15` }}
+        >
+          {dbTypeBadge(conn.type).label}
+        </span>
+        <span className="text-xs truncate flex-1 min-w-0">{conn.name}</span>
+        {conn.favorite && (
+          <Star size={10} className="text-yellow-500 fill-yellow-500 flex-shrink-0" />
+        )}
+        {conn.readOnly && (
+          <span title={t('connection.readOnlyHint')}>
+            <Shield size={10} className="text-orange-500 flex-shrink-0" />
+          </span>
+        )}
+        {conn.isConnected && (
+          <Circle size={8} className="text-green-500 fill-green-500 flex-shrink-0" />
+        )}
+        {conn.aiDisabled && (
+          <span title={t('connection.aiDisabledHint')}>
+            <BotOff size={10} className="text-muted-foreground/50 flex-shrink-0" />
+          </span>
+        )}
+      </div>
+
+      {/* Expanded Tree */}
+      {expandedConnections.has(conn.id) && conn.isConnected && (
+        <div className="ml-4 border-l border-border/50 min-w-0 overflow-hidden">
+          {(conn.databases || []).map((db) => (
+            <div key={db.name}>
+              <div
+                className="flex items-center gap-1.5 px-2 py-0.5 cursor-pointer hover:bg-hover rounded-sm mx-1 text-xs min-w-0"
+                onClick={() => toggleGroup(`${conn.id}-${db.name}`)}
+                onDoubleClick={() => {
+                  if (conn.type === 'redis') openRedisKeyBrowser(conn.id, db.name);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDbMenu({ x: e.clientX, y: e.clientY, connId: conn.id, dbName: db.name, connType: conn.type });
+                }}
+              >
+                {expandedGroups.has(`${conn.id}-${db.name}`) ? (
+                  <ChevronDown size={10} className="text-muted-foreground flex-shrink-0" />
+                ) : (
+                  <ChevronRight size={10} className="text-muted-foreground flex-shrink-0" />
+                )}
+                <span className="text-muted-foreground flex-shrink-0"><Database size={12} /></span>
+                <span className="truncate flex-1 min-w-0">{db.name}</span>
+              </div>
+
+              {expandedGroups.has(`${conn.id}-${db.name}`) && (
+                <div className="ml-4 min-w-0 overflow-hidden">
+                  {db.collections && db.collections.length > 0 && (
+                    <TreeGroup icon={<Layers size={12} />} label={t('sidebar.collections')} count={db.collections.length} expanded={expandedGroups.has(`${conn.id}-${db.name}-collections`)} onToggle={() => toggleGroup(`${conn.id}-${db.name}-collections`)}>
+                      {db.collections.map((col) => (
+                        <TreeItem key={col.name} icon={<Box size={12} />} label={col.name} onDoubleClick={() => handleTableDoubleClick(col.name, conn.id, db.name)} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setObjectMenu({ x: e.clientX, y: e.clientY, tableName: col.name, connId: conn.id, database: db.name, connType: conn.type }); }} />
+                      ))}
+                    </TreeGroup>
+                  )}
+                  {db.tables && db.tables.length > 0 && (
+                    <TreeGroup icon={<Table size={12} />} label={t('sidebar.tables')} count={db.tables.length} expanded={expandedGroups.has(`${conn.id}-${db.name}-tables`)} onToggle={() => toggleGroup(`${conn.id}-${db.name}-tables`)}>
+                      {db.tables.map((table) => (
+                        <TreeItem key={table.name} icon={<Columns size={12} />} label={table.name} loading={loadingTable?.connId === conn.id && loadingTable?.dbName === db.name && loadingTable?.tableName === table.name} onDoubleClick={() => handleTableDoubleClick(table.name, conn.id, db.name)} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setObjectMenu({ x: e.clientX, y: e.clientY, tableName: table.name, connId: conn.id, database: db.name, connType: conn.type }); }} />
+                      ))}
+                    </TreeGroup>
+                  )}
+                  {db.views && db.views.length > 0 && (
+                    <TreeGroup icon={<Eye size={12} />} label={t('sidebar.views')} count={db.views.length} expanded={expandedGroups.has(`${conn.id}-${db.name}-views`)} onToggle={() => toggleGroup(`${conn.id}-${db.name}-views`)}>
+                      {db.views.map((view) => <TreeItem key={view.name} icon={<Eye size={12} />} label={view.name} />)}
+                    </TreeGroup>
+                  )}
+                  {db.functions && db.functions.length > 0 && (
+                    <TreeGroup icon={<FunctionSquare size={12} />} label={t('sidebar.functions')} count={db.functions.length} expanded={expandedGroups.has(`${conn.id}-${db.name}-functions`)} onToggle={() => toggleGroup(`${conn.id}-${db.name}-functions`)}>
+                      {db.functions.map((func) => <TreeItem key={func.name} icon={<FunctionSquare size={12} />} label={func.name} />)}
+                    </TreeGroup>
+                  )}
+                  <TreeItem icon={<Box size={12} />} label={t('sidebar.procedures')} />
+                  <TreeItem icon={<Key size={12} />} label={t('sidebar.indexes')} />
+                  <TreeItem icon={<Hash size={12} />} label={t('sidebar.sequences')} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="flex flex-col bg-sidebar border-r border-sidebar-border h-full overflow-hidden" style={{ width: `${width}px`, minWidth: '180px', maxWidth: '400px' }}>
@@ -611,180 +737,55 @@ export function Sidebar({ width = 260 }: SidebarProps) {
       {/* Connection Tree */}
       <ScrollArea className="flex-1 overflow-x-hidden">
         <div className="py-1">
-          {groupedConnections.length === 0 ? (
+          {filteredConnections.length === 0 ? (
             <div className="px-3 py-8 text-center">
               <Database size={32} className="mx-auto mb-2 text-muted-foreground/50" />
               <p className="text-xs text-muted-foreground">{t('sidebar.noConnections')}</p>
               <p className="text-2xs text-muted-foreground/70 mt-1">{t('sidebar.clickToAdd')}</p>
             </div>
           ) : (
-            groupedConnections.map((group) => (
-              <div key={group.type}>
-                {group.connections.map((conn) => (
-                  <div key={conn.id}>
-                    <div
-                      className="flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-hover rounded-sm mx-1 group min-w-0"
-                      onContextMenu={(e) => handleContextMenu(e, conn.id)}
-                      onClick={() => toggleConnection(conn.id)}
-                      onDoubleClick={() => handleDoubleClick(conn.id)}
-                    >
-                      <span
-                        className="w-2 h-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: conn.color || '#3b82f6' }}
-                      />
-                      {expandedConnections.has(conn.id) ? (
-                        <ChevronDown size={12} className="text-muted-foreground flex-shrink-0" />
-                      ) : (
-                        <ChevronRight size={12} className="text-muted-foreground flex-shrink-0" />
-                      )}
-                      <span
-                        className="text-2xs font-bold px-1 py-0 rounded flex-shrink-0"
-                        style={{ color: dbTypeBadge(conn.type).color, backgroundColor: `${dbTypeBadge(conn.type).color}15` }}
-                      >
-                        {dbTypeBadge(conn.type).label}
-                      </span>
-                      <span className="text-xs truncate flex-1 min-w-0">{conn.name}</span>
-                      {conn.isConnected && (
-                        <Circle size={8} className="text-green-500 fill-green-500 flex-shrink-0" />
-                      )}
-                      {conn.aiDisabled && (
-                        <span title={t('connection.aiDisabledHint')}>
-                          <BotOff size={10} className="text-muted-foreground/50 flex-shrink-0" />
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Expanded Tree */}
-                    {expandedConnections.has(conn.id) && conn.isConnected && (
-                      <div className="ml-4 border-l border-border/50 min-w-0 overflow-hidden">
-                        {(conn.databases || []).map((db) => (
-                          <div key={db.name}>
-                            <div
-                              className="flex items-center gap-1.5 px-2 py-0.5 cursor-pointer hover:bg-hover rounded-sm mx-1 text-xs min-w-0"
-                              onClick={() => toggleGroup(`${conn.id}-${db.name}`)}
-                              onDoubleClick={() => {
-                                if (conn.type === 'redis') openRedisKeyBrowser(conn.id, db.name);
-                              }}
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setDbMenu({ x: e.clientX, y: e.clientY, connId: conn.id, dbName: db.name, connType: conn.type });
-                              }}
-                            >
-                              {expandedGroups.has(`${conn.id}-${db.name}`) ? (
-                                <ChevronDown size={10} className="text-muted-foreground flex-shrink-0" />
-                              ) : (
-                                <ChevronRight size={10} className="text-muted-foreground flex-shrink-0" />
-                              )}
-                              <span className="text-muted-foreground flex-shrink-0"><Database size={12} /></span>
-                              <span className="truncate flex-1 min-w-0">{db.name}</span>
-                            </div>
-
-                            {expandedGroups.has(`${conn.id}-${db.name}`) && (
-                              <div className="ml-4 min-w-0 overflow-hidden">
-                                {/* Collections (for MongoDB / Redis) */}
-                                {db.collections && db.collections.length > 0 && (
-                                  <TreeGroup
-                                    icon={<Layers size={12} />}
-                                    label={t('sidebar.collections')}
-                                    count={db.collections.length}
-                                    expanded={expandedGroups.has(`${conn.id}-${db.name}-collections`)}
-                                    onToggle={() => toggleGroup(`${conn.id}-${db.name}-collections`)}
-                                  >
-                                    {db.collections.map((col) => (
-                                      <TreeItem
-                                        key={col.name}
-                                        icon={<Box size={12} />}
-                                        label={col.name}
-                                        onDoubleClick={() => handleTableDoubleClick(col.name, conn.id, db.name)}
-                                        onContextMenu={(e) => {
-                                          e.preventDefault();
-                                          e.stopPropagation();
-                                          setObjectMenu({ x: e.clientX, y: e.clientY, tableName: col.name, connId: conn.id, database: db.name, connType: conn.type });
-                                        }}
-                                      />
-                                    ))}
-                                  </TreeGroup>
-                                )}
-
-                                {/* Tables Group */}
-                                {db.tables && db.tables.length > 0 && (
-                                  <TreeGroup
-                                    icon={<Table size={12} />}
-                                    label={t('sidebar.tables')}
-                                    count={db.tables.length}
-                                    expanded={expandedGroups.has(`${conn.id}-${db.name}-tables`)}
-                                    onToggle={() => toggleGroup(`${conn.id}-${db.name}-tables`)}
-                                  >
-                                    {db.tables.map((table) => (
-                                      <TreeItem
-                                        key={table.name}
-                                        icon={<Columns size={12} />}
-                                        label={table.name}
-                                        loading={loadingTable?.connId === conn.id && loadingTable?.dbName === db.name && loadingTable?.tableName === table.name}
-                                        onDoubleClick={() => handleTableDoubleClick(table.name, conn.id, db.name)}
-                                        onContextMenu={(e) => {
-                                          e.preventDefault();
-                                          e.stopPropagation();
-                                          setObjectMenu({ x: e.clientX, y: e.clientY, tableName: table.name, connId: conn.id, database: db.name, connType: conn.type });
-                                        }}
-                                      />
-                                    ))}
-                                  </TreeGroup>
-                                )}
-
-                                {/* Views Group */}
-                                {db.views && db.views.length > 0 && (
-                                  <TreeGroup
-                                    icon={<Eye size={12} />}
-                                    label={t('sidebar.views')}
-                                    count={db.views.length}
-                                    expanded={expandedGroups.has(`${conn.id}-${db.name}-views`)}
-                                    onToggle={() => toggleGroup(`${conn.id}-${db.name}-views`)}
-                                  >
-                                    {db.views.map((view) => (
-                                      <TreeItem
-                                        key={view.name}
-                                        icon={<Eye size={12} />}
-                                        label={view.name}
-                                      />
-                                    ))}
-                                  </TreeGroup>
-                                )}
-
-                                {/* Functions Group */}
-                                {db.functions && db.functions.length > 0 && (
-                                  <TreeGroup
-                                    icon={<FunctionSquare size={12} />}
-                                    label={t('sidebar.functions')}
-                                    count={db.functions.length}
-                                    expanded={expandedGroups.has(`${conn.id}-${db.name}-functions`)}
-                                    onToggle={() => toggleGroup(`${conn.id}-${db.name}-functions`)}
-                                  >
-                                    {db.functions.map((func) => (
-                                      <TreeItem
-                                        key={func.name}
-                                        icon={<FunctionSquare size={12} />}
-                                        label={func.name}
-                                      />
-                                    ))}
-                                  </TreeGroup>
-                                )}
-
-                                {/* Other groups */}
-                                <TreeItem icon={<Box size={12} />} label={t('sidebar.procedures')} />
-                                <TreeItem icon={<Key size={12} />} label={t('sidebar.indexes')} />
-                                <TreeItem icon={<Hash size={12} />} label={t('sidebar.sequences')} />
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+            <>
+              {/* Favorites Section */}
+              {favoriteConns.length > 0 && (
+                <div>
+                  <div
+                    className="flex items-center gap-1.5 px-3 py-1 cursor-pointer hover:bg-hover rounded-sm mx-1 text-2xs font-semibold text-muted-foreground uppercase tracking-wider"
+                    onClick={() => toggleFolder('__favorites__')}
+                  >
+                    {expandedFolders.has('__favorites__') ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                    <Star size={10} className="text-yellow-500 fill-yellow-500" />
+                    {t('connection.favorites')}
                   </div>
-                ))}
+                  {expandedFolders.has('__favorites__') && favoriteConns.map((conn) => renderConnection(conn))}
+                </div>
+              )}
+
+              {/* Group Folders */}
+              {allGroups.map((groupName) => {
+                const groupConns = filteredConnections.filter((c) => c.group === groupName);
+                if (groupConns.length === 0) return null;
+                return (
+                  <div key={`group-${groupName}`}>
+                    <div
+                      className="flex items-center gap-1.5 px-3 py-1 cursor-pointer hover:bg-hover rounded-sm mx-1 text-2xs font-semibold text-muted-foreground uppercase tracking-wider"
+                      onClick={() => toggleFolder(`__group_${groupName}__`)}
+                    >
+                      {expandedFolders.has(`__group_${groupName}__`) ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                      <FolderOpen size={10} />
+                      {groupName}
+                    </div>
+                    {expandedFolders.has(`__group_${groupName}__`) && groupConns.map((conn) => renderConnection(conn))}
+                  </div>
+                );
+              })}
+
+              {/* Type-based groups (ungrouped connections) */}
+              {groupedConnections.map((group) => (
+              <div key={group.type}>
+                {group.connections.map((conn) => renderConnection(conn))}
               </div>
-            ))
+            ))}
+            </>
           )}
         </div>
       </ScrollArea>
@@ -827,6 +828,36 @@ export function Sidebar({ width = 260 }: SidebarProps) {
               label: t('connection.duplicate'),
               icon: <Copy size={12} />,
               onClick: () => handleDuplicate(contextMenu.connectionId),
+            },
+            {
+              label: connections.find((c) => c.id === contextMenu.connectionId)?.favorite
+                ? t('connection.removeFavorite')
+                : t('connection.addToFavorite'),
+              icon: <Star size={12} />,
+              onClick: () => toggleFavorite(contextMenu.connectionId),
+            },
+            {
+              label: t('connection.setGroup'),
+              icon: <FolderOpen size={12} />,
+              onClick: async () => {
+                const conn = connections.find((c) => c.id === contextMenu.connectionId);
+                const currentGroup = conn?.group || '';
+                const newGroup = await dialog.prompt(t('connection.enterGroupName'), {
+                  title: t('connection.setGroup'),
+                  placeholder: t('connection.groupPlaceholder'),
+                  defaultValue: currentGroup,
+                });
+                if (newGroup !== null) {
+                  setConnectionGroup(contextMenu.connectionId, newGroup.trim() || undefined);
+                }
+              },
+            },
+            {
+              label: connections.find((c) => c.id === contextMenu.connectionId)?.readOnly
+                ? t('connection.disableReadOnly')
+                : t('connection.enableReadOnly'),
+              icon: <Shield size={12} />,
+              onClick: () => toggleReadOnly(contextMenu.connectionId),
             },
             {
               label: connections.find((c) => c.id === contextMenu.connectionId)?.aiDisabled

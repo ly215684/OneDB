@@ -19,6 +19,10 @@ interface ConnectionState {
   getConnection: (id: string) => Connection | undefined;
   getConnectionsByType: (type: DatabaseType) => Connection[];
   toggleAIDisabled: (id: string) => void;
+  toggleFavorite: (id: string) => void;
+  setConnectionGroup: (id: string, group: string | undefined) => void;
+  toggleReadOnly: (id: string) => void;
+  getAllGroups: () => string[];
 }
 
 function generateId(): string {
@@ -166,6 +170,38 @@ export const useConnectionStore = create<ConnectionState>()(
             c.id === id ? { ...c, aiDisabled: !c.aiDisabled, updatedAt: Date.now() } : c
           ),
         }));
+      },
+
+      toggleFavorite: (id) => {
+        set((state) => ({
+          connections: state.connections.map((c) =>
+            c.id === id ? { ...c, favorite: !c.favorite, updatedAt: Date.now() } : c
+          ),
+        }));
+      },
+
+      setConnectionGroup: (id, group) => {
+        set((state) => ({
+          connections: state.connections.map((c) =>
+            c.id === id ? { ...c, group, updatedAt: Date.now() } : c
+          ),
+        }));
+      },
+
+      toggleReadOnly: (id) => {
+        set((state) => ({
+          connections: state.connections.map((c) =>
+            c.id === id ? { ...c, readOnly: !c.readOnly, updatedAt: Date.now() } : c
+          ),
+        }));
+      },
+
+      getAllGroups: () => {
+        const groups = new Set<string>();
+        get().connections.forEach((c) => {
+          if (c.group) groups.add(c.group);
+        });
+        return Array.from(groups).sort();
       },
     }),
     {

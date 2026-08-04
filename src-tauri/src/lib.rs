@@ -1,5 +1,6 @@
 mod conn_manager;
 mod db;
+mod ssh_tunnel;
 
 use db::{
     list_databases_impl, test_connection_impl, execute_query_impl, execute_batch_impl,

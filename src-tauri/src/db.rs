@@ -253,17 +253,47 @@ fn build_mysql_opts(config: &serde_json::Value) -> mysql_async::Opts {
     builder.into()
 }
 
+/// If SSH tunnel is enabled in config, open the tunnel and return a modified
+/// config pointing to the local port, plus the tunnel handle.
+async fn maybe_open_ssh_tunnel(
+    config: &serde_json::Value,
+) -> Result<(Option<serde_json::Value>, Option<crate::ssh_tunnel::SSHTunnel>), String> {
+    let ssh = &config["sshTunnel"];
+    if !ssh.is_object() || !ssh["enabled"].as_bool().unwrap_or(false) {
+        return Ok((None, None));
+    }
+    let ssh_host = ssh["host"].as_str().unwrap_or("localhost");
+    let ssh_port = ssh["port"].as_u64().unwrap_or(22) as u16;
+    let ssh_user = ssh["username"].as_str().unwrap_or("");
+    let ssh_pass = ssh["password"].as_str();
+    let ssh_key = ssh["privateKey"].as_str();
+    let remote_host = config["host"].as_str().unwrap_or("localhost");
+    let remote_port = config["port"].as_u64().unwrap_or(3306) as u16;
+
+    let tunnel = crate::ssh_tunnel::open_tunnel(
+        ssh_host, ssh_port, ssh_user, ssh_pass, ssh_key,
+        remote_host, remote_port,
+    ).await?;
+
+    let mut new_config = config.clone();
+    new_config["host"] = serde_json::Value::String("127.0.0.1".to_string());
+    new_config["port"] = serde_json::Value::Number(serde_json::Number::from(tunnel.local_port));
+    Ok((Some(new_config), Some(tunnel)))
+}
+
 /// Get a cached MySQL pool for config (+ optional database override).
 async fn mysql_pool(
     config: &serde_json::Value,
     database: Option<&str>,
 ) -> Result<mysql_async::Pool, String> {
+    let (effective_config, tunnel) = maybe_open_ssh_tunnel(config).await?;
+    let active_config = effective_config.as_ref().unwrap_or(config);
     let qualifier = database.unwrap_or("");
-    let key = conn_manager::config_key("mysql", config, qualifier);
-    let config = config.clone();
+    let key = conn_manager::config_key("mysql", active_config, qualifier);
+    let config_clone = active_config.clone();
     let db_owned = database.map(|s| s.to_string());
-    conn_manager::get_mysql_pool(&key, move || {
-        let mut opts: mysql_async::Opts = build_mysql_opts(&config).into();
+    conn_manager::get_mysql_pool(&key, tunnel, move || {
+        let mut opts: mysql_async::Opts = build_mysql_opts(&config_clone).into();
         if let Some(db) = db_owned {
             if !db.is_empty() {
                 opts = mysql_async::OptsBuilder::from_opts(opts)
@@ -380,12 +410,14 @@ async fn pg_client(
     config: &serde_json::Value,
     database: Option<&str>,
 ) -> Result<std::sync::Arc<tokio_postgres::Client>, String> {
+    let (effective_config, tunnel) = maybe_open_ssh_tunnel(config).await?;
+    let active_config = effective_config.as_ref().unwrap_or(config);
     let qualifier = database.unwrap_or("");
-    let key = conn_manager::config_key("pg", config, qualifier);
-    let config = config.clone();
+    let key = conn_manager::config_key("pg", active_config, qualifier);
+    let config_clone = active_config.clone();
     let db_owned = database.map(|s| s.to_string());
-    conn_manager::get_pg_client(&key, move || {
-        let config = config.clone();
+    conn_manager::get_pg_client(&key, tunnel, move || {
+        let config = config_clone.clone();
         let db_owned = db_owned.clone();
         Box::pin(async move {
             let mut pg_config = build_pg_config(&config);

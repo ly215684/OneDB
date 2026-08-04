@@ -219,12 +219,32 @@ export async function listDatabases(
 }
 
 // Execute SQL/query via Tauri backend
+/// Check if a SQL statement is a write operation (DML/DDL)
+const WRITE_SQL_PATTERN = /^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|REPLACE|RENAME|GRANT|REVOKE|MERGE)\b/i;
+
+export function isWriteQuery(query: string): boolean {
+  // Handle multiple statements separated by ;
+  const stmts = query.split(';').map((s) => s.trim()).filter((s) => s.length > 0);
+  return stmts.some((s) => WRITE_SQL_PATTERN.test(s));
+}
+
 export async function executeQuery(
   type: DatabaseType,
   config: ConnectionConfig,
   query: string,
-  database?: string
+  database?: string,
+  readOnly?: boolean,
 ): Promise<QueryResult> {
+  if (readOnly && isWriteQuery(query)) {
+    return {
+      columns: [],
+      rows: [],
+      rowCount: 0,
+      duration: 0,
+      success: false,
+      error: 'This connection is in read-only mode. Write operations are not allowed.',
+    };
+  }
   try {
     const result = await invoke<{
       columns: string[];

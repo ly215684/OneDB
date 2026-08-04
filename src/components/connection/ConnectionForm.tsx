@@ -244,25 +244,45 @@ export function ConnectionForm({ type, connection, onBack, onSave, onTest }: Con
 
         {/* SSL / SSH options */}
         {(type !== 'sqlite' && type !== 'duckdb') && (
-          <div className="flex gap-4 pt-2">
-            <label className="flex items-center gap-2 text-xs cursor-pointer">
-              <input
-                type="checkbox"
-                checked={config.ssl || false}
-                onChange={(e) => updateConfig('ssl', e.target.checked)}
-                className="rounded border-border"
-              />
-              {t('connection.ssl')}
-            </label>
-            <label className="flex items-center gap-2 text-xs cursor-pointer">
-              <input
-                type="checkbox"
-                checked={config.sshTunnel?.enabled || false}
-                onChange={(e) => updateConfig('sshTunnel', { ...config.sshTunnel, enabled: e.target.checked })}
-                className="rounded border-border"
-              />
-              {t('connection.sshTunnel')}
-            </label>
+          <div className="space-y-3 pt-2">
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={config.ssl || false}
+                  onChange={(e) => updateConfig('ssl', e.target.checked)}
+                  className="rounded border-border"
+                />
+                {t('connection.ssl')}
+              </label>
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={config.sshTunnel?.enabled || false}
+                  onChange={(e) => updateConfig('sshTunnel', { ...config.sshTunnel, enabled: e.target.checked })}
+                  className="rounded border-border"
+                />
+                {t('connection.sshTunnel')}
+              </label>
+            </div>
+
+            {/* SSH Tunnel Config Fields */}
+            {config.sshTunnel?.enabled && (
+              <div className="space-y-2 p-3 rounded-md border border-border bg-muted/30">
+                <p className="text-xs font-medium text-muted-foreground">{t('connection.sshConfig')}</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2">
+                    <Input label={t('connection.sshHost')} value={config.sshTunnel?.host || ''} onChange={(e) => updateConfig('sshTunnel', { ...config.sshTunnel, host: e.target.value })} placeholder="ssh.example.com" />
+                  </div>
+                  <Input label={t('connection.sshPort')} type="number" value={config.sshTunnel?.port?.toString() || '22'} onChange={(e) => updateConfig('sshTunnel', { ...config.sshTunnel, port: parseInt(e.target.value) || 22 })} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label={t('connection.sshUser')} value={config.sshTunnel?.username || ''} onChange={(e) => updateConfig('sshTunnel', { ...config.sshTunnel, username: e.target.value })} />
+                  <Input label={t('connection.sshPassword')} type={pwdType} value={config.sshTunnel?.password || ''} onChange={(e) => updateConfig('sshTunnel', { ...config.sshTunnel, password: e.target.value })} />
+                </div>
+                <Input label={t('connection.sshPrivateKey')} type={pwdType} value={config.sshTunnel?.privateKey || ''} onChange={(e) => updateConfig('sshTunnel', { ...config.sshTunnel, privateKey: e.target.value })} placeholder={t('connection.sshPrivateKeyPlaceholder')} />
+              </div>
+            )}
           </div>
         )}
 

@@ -100,7 +100,7 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
 
       // For Redis, treat entire text as a single statement
       if (isRedis) {
-        const queryResult = await executeQuery(conn.type, conn.config, sqlText, selectedDb || undefined);
+        const queryResult = await executeQuery(conn.type, conn.config, sqlText, selectedDb || undefined, conn.readOnly);
         setResults([queryResult]);
         if (activeConnId) {
           addHistory({ sql: sqlText, connectionId: activeConnId, result: queryResult, duration: queryResult.duration });
@@ -130,7 +130,7 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
 
         const allResults: QueryResult[] = [];
         for (const op of operations) {
-          const queryResult = await executeQuery(conn.type, conn.config, op, selectedDb || undefined);
+          const queryResult = await executeQuery(conn.type, conn.config, op, selectedDb || undefined, conn.readOnly);
           allResults.push(queryResult);
           if (activeConnId) {
             addHistory({ sql: op, connectionId: activeConnId, result: queryResult, duration: queryResult.duration });
@@ -153,7 +153,7 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
 
       const allResults: QueryResult[] = [];
       for (const stmt of statements) {
-        const queryResult = await executeQuery(conn.type, conn.config, stmt, selectedDb || undefined);
+        const queryResult = await executeQuery(conn.type, conn.config, stmt, selectedDb || undefined, conn.readOnly);
         allResults.push(queryResult);
         if (activeConnId) {
           addHistory({ sql: stmt, connectionId: activeConnId, result: queryResult, duration: queryResult.duration });

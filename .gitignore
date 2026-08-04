@@ -25,3 +25,4 @@ dist-ssr
 ~/.tauri/
 onedb.key
 onedb.key.pub
+todo.md

@@ -37,6 +37,9 @@ export interface Connection {
   isConnected?: boolean;
   databases?: DatabaseInfo[];
   aiDisabled?: boolean;
+  group?: string;
+  favorite?: boolean;
+  readOnly?: boolean;
 }
 
 export interface DatabaseInfo {
