@@ -1,5 +1,7 @@
 use serde::Serialize;
 use mysql_async::prelude::Queryable;
+use rusqlite::OptionalExtension;
+use duckdb::OptionalExt;
 use crate::conn_manager;
 
 // ─── Error sanitization ───────────────────────────────────────────
@@ -52,7 +54,16 @@ impl rustls::client::danger::ServerCertVerifier for AcceptAnyCertVerifier {
         Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
-    fn verify_tls2_signature(
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
         &self,
         _message: &[u8],
         _cert: &rustls::pki_types::CertificateDer<'_>,
@@ -80,12 +91,12 @@ impl rustls::client::danger::ServerCertVerifier for AcceptAnyCertVerifier {
     }
 }
 
-fn pg_tls_connector() -> Result<tokio_postgres_rustls::MakeRustTlsConnect, String> {
+fn pg_tls_connector() -> Result<tokio_postgres_rustls::MakeRustlsConnect, String> {
     let config = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(std::sync::Arc::new(AcceptAnyCertVerifier))
         .with_no_client_auth();
-    Ok(tokio_postgres_rustls::MakeRustTlsConnect::new(config))
+    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
 }
 
 /// Whether SSL/TLS is requested for this connection config.
@@ -374,6 +385,8 @@ async fn pg_client(
     let config = config.clone();
     let db_owned = database.map(|s| s.to_string());
     conn_manager::get_pg_client(&key, move || {
+        let config = config.clone();
+        let db_owned = db_owned.clone();
         Box::pin(async move {
             let mut pg_config = build_pg_config(&config);
             if let Some(db) = db_owned {
@@ -1600,8 +1613,7 @@ async fn get_structure_mysql(
     database: &str,
     table: &str,
 ) -> Result<TableStructureData, String> {
-    let url = build_mysql_url(config);
-    let pool = mysql_async::Pool::new(url.as_str());
+    let pool = mysql_async::Pool::new(build_mysql_opts(config));
     let mut conn = pool.get_conn().await.map_err(|e| e.to_string())?;
 
     let safe_db = database.replace('\'', "''");
@@ -1908,8 +1920,7 @@ pub async fn get_er_data_impl(
 }
 
 async fn get_er_mysql(config: &serde_json::Value, database: &str) -> Result<ERDiagramData, String> {
-    let url = build_mysql_url(config);
-    let pool = mysql_async::Pool::new(url.as_str());
+    let pool = mysql_async::Pool::new(build_mysql_opts(config));
     let mut conn = pool.get_conn().await.map_err(|e| e.to_string())?;
     let safe_db = database.replace('\'', "''");
 
