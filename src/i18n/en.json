@@ -201,7 +201,12 @@
     "copySql": "Copy SQL",
     "insertToEditor": "Insert to Editor",
     "mongoJsonFormat": "MongoDB requires JSON format queries (single object or array). find: {\"collection\": \"users\", \"operation\": \"find\", \"filter\": {}, \"limit\": 100} | batch: [{...}, {...}]",
-        "mongoPlaceholder": "{\n  \"collection\": \"users\",\n  \"operation\": \"find\",\n  \"filter\": {},\n  \"limit\": 100\n}\n// Array batch execution:\n// [{...}, {...}]"
+        "mongoPlaceholder": "{\n  \"collection\": \"users\",\n  \"operation\": \"find\",\n  \"filter\": {},\n  \"limit\": 100\n}\n// Array batch execution:\n// [{...}, {...}]",
+    "snippets": "SQL Snippets",
+    "saveSnippet": "Save Snippet",
+    "noSnippets": "No saved snippets",
+    "snippetName": "Snippet name (optional)",
+    "batchProgress": "{{current}}/{{total}}"
   },
   "table": {
     "data": "Data",

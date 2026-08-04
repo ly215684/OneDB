@@ -201,7 +201,12 @@
     "copySql": "复制 SQL",
     "insertToEditor": "插入编辑器",
     "mongoJsonFormat": "MongoDB 需要 JSON 格式查询（支持单个对象或数组）。find: {\"collection\": \"users\", \"operation\": \"find\", \"filter\": {}, \"limit\": 100} | 批量: [{...}, {...}]",
-        "mongoPlaceholder": "{\n  \"collection\": \"users\",\n  \"operation\": \"find\",\n  \"filter\": {},\n  \"limit\": 100\n}\n// 支持数组批量执行:\n// [{...}, {...}]"
+        "mongoPlaceholder": "{\n  \"collection\": \"users\",\n  \"operation\": \"find\",\n  \"filter\": {},\n  \"limit\": 100\n}\n// 支持数组批量执行:\n// [{...}, {...}]",
+    "snippets": "SQL 片段库",
+    "saveSnippet": "保存片段",
+    "noSnippets": "暂无保存的片段",
+    "snippetName": "片段名称（可选）",
+    "batchProgress": "{{current}}/{{total}}"
   },
   "table": {
     "data": "数据",

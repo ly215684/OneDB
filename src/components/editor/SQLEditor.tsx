@@ -7,7 +7,7 @@ import { useConnectionStore } from '../../stores/connectionStore';
 import { useTabStore } from '../../stores/tabStore';
 import type { QueryResult } from '../../types/connection';
 import { executeQuery, listDatabases } from '../../services/connectionService';
-import { Play, PlaySquare, Eraser, Clock, ArrowDownToLine, Database, ChevronDown, Server, Wand2, FileSearch } from 'lucide-react';
+import { Play, PlaySquare, Eraser, Clock, ArrowDownToLine, Database, ChevronDown, Server, Wand2, FileSearch, Bookmark, BookmarkPlus, Trash2, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Tooltip } from '../ui/Tooltip';
 import { DropdownMenu } from '../ui/DropdownMenu';
@@ -16,6 +16,7 @@ import { exportToFile, type ExportFormat } from '../../services/exportService';
 import { splitSqlStatements } from '../../utils/sqlSplitter';
 import { formatSql } from '../../utils/sqlFormatter';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useSnippetStore } from '../../stores/snippetStore';
 
 interface SQLEditorProps {
   tabId: string;
@@ -34,6 +35,10 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
   const [results, setResults] = useState<QueryResult[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showSnippets, setShowSnippets] = useState(false);
+  const [saveSnippetName, setSaveSnippetName] = useState('');
+  const [showSaveSnippet, setShowSaveSnippet] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; currentSql: string } | null>(null);
   const [selectedDb, setSelectedDb] = useState(initialDatabase || '');
   const [selectedConnId, setSelectedConnId] = useState(connectionId || '');
   const addHistory = useQueryHistoryStore((s) => s.addHistory);
@@ -42,6 +47,9 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
   const getConnection = useConnectionStore((s) => s.getConnection);
   const setDatabases = useConnectionStore((s) => s.setDatabases);
   const updateTab = useTabStore((s) => s.updateTab);
+  const snippets = useSnippetStore((s) => s.snippets);
+  const addSnippet = useSnippetStore((s) => s.addSnippet);
+  const removeSnippet = useSnippetStore((s) => s.removeSnippet);
   const [loadingDbs, setLoadingDbs] = useState(false);
 
   // Get databases list from selected connection
@@ -151,8 +159,18 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
         return;
       }
 
+      // Show progress for multi-statement execution
+      const showProgress = statements.length > 1;
+      if (showProgress) {
+        setBatchProgress({ current: 0, total: statements.length, currentSql: '' });
+      }
+
       const allResults: QueryResult[] = [];
-      for (const stmt of statements) {
+      for (let i = 0; i < statements.length; i++) {
+        const stmt = statements[i];
+        if (showProgress) {
+          setBatchProgress({ current: i + 1, total: statements.length, currentSql: stmt.slice(0, 80) });
+        }
         const queryResult = await executeQuery(conn.type, conn.config, stmt, selectedDb || undefined, conn.readOnly);
         allResults.push(queryResult);
         if (activeConnId) {
@@ -162,6 +180,9 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
         if (!queryResult.success) break;
       }
       setResults(allResults);
+      if (showProgress) {
+        setBatchProgress(null);
+      }
     } catch (error) {
       setResults([{ columns: [], rows: [], rowCount: 0, duration: 0, success: false, error: String(error) }]);
     } finally {
@@ -170,6 +191,20 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
   }, [activeConnId, selectedDb, addHistory, getConnection, t]);
 
   const handleClear = () => { setSql(''); setResults([]); };
+
+  // Save current SQL as snippet
+  const handleSaveSnippet = () => {
+    if (!sql.trim()) return;
+    const name = saveSnippetName.trim() || sql.trim().slice(0, 30);
+    addSnippet({ name, sql, connectionId: activeConnId || undefined, database: selectedDb || undefined });
+    setSaveSnippetName('');
+    setShowSaveSnippet(false);
+  };
+
+  // Sync SQL content to tab data for session recovery
+  useEffect(() => {
+    updateTab(tabId, { data: { sql } });
+  }, [sql]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Execute only the selected text (falls back to whole editor if nothing selected)
   const handleExecuteSelected = useCallback(() => {
@@ -293,7 +328,13 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleClear}><Eraser size={14} /></Button>
         </Tooltip>
         <Tooltip content={t('editor.history')}>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowHistory(!showHistory)}><Clock size={14} /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setShowHistory(!showHistory); if (showSnippets) setShowSnippets(false); }}><Clock size={14} /></Button>
+        </Tooltip>
+        <Tooltip content={t('editor.snippets')}>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setShowSnippets(!showSnippets); if (showHistory) setShowHistory(false); }}><Bookmark size={14} /></Button>
+        </Tooltip>
+        <Tooltip content={t('editor.saveSnippet')}>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowSaveSnippet(!showSaveSnippet)}><BookmarkPlus size={14} /></Button>
         </Tooltip>
         <div className="flex-1" />
         {results.length > 0 && (
@@ -308,7 +349,7 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
           />
         )}
       </div>
-      <div className="flex-1 min-h-0 flex" style={{ flex: showHistory ? '2 1 0%' : '1 1 0%' }}>
+      <div className="flex-1 min-h-0 flex" style={{ flex: (showHistory || showSnippets) ? '2 1 0%' : '1 1 0%' }}>
         <div className="flex-1">
           <CodeMirrorEditor value={sql} onChange={setSql} onExecute={handleExecute} onFormat={handleFormat} apiRef={editorApi} placeholder={editorPlaceholder} isMongo={isMongo} />
         </div>
@@ -332,8 +373,71 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
             </div>
           </div>
         )}
+        {showSnippets && (
+          <div className="w-64 border-l border-border flex flex-col">
+            <div className="px-2 py-1 border-b border-border flex items-center justify-between">
+              <span className="text-xs font-semibold">{t('editor.snippets')}</span>
+              <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setShowSnippets(false)}><Eraser size={10} /></Button>
+            </div>
+            <div className="flex-1 overflow-auto">
+              {snippets.length === 0 ? (
+                <div className="p-3 text-xs text-muted-foreground text-center">{t('editor.noSnippets')}</div>
+              ) : (
+                snippets.map((snip) => (
+                  <div key={snip.id} className="px-2 py-1.5 border-b border-border/50 group">
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs font-medium truncate flex-1 cursor-pointer hover:text-primary" onClick={() => { setSql(snip.sql); }}>{snip.name}</span>
+                      <button
+                        className="h-4 w-4 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-500/20 text-red-400"
+                        onClick={() => removeSnippet(snip.id)}
+                      >
+                        <Trash2 size={10} />
+                      </button>
+                    </div>
+                    <div className="truncate font-mono text-2xs text-muted-foreground mt-0.5 cursor-pointer" onClick={() => { setSql(snip.sql); }}>{snip.sql}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
       <div className="h-1 bg-border cursor-row-resize hover:bg-primary/30 transition-colors flex-shrink-0" />
+      {/* Batch execution progress */}
+      {batchProgress && (
+        <div className="px-3 py-1.5 border-b border-border bg-muted/30 flex items-center gap-2">
+          <Loader2 size={12} className="animate-spin text-primary flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="flex justify-between text-2xs text-muted-foreground mb-0.5">
+              <span>{t('editor.batchProgress', { current: batchProgress.current, total: batchProgress.total })}</span>
+              <span className="truncate max-w-[200px] ml-2">{batchProgress.currentSql}</span>
+            </div>
+            <div className="h-1 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-200"
+                style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Save snippet inline form */}
+      {showSaveSnippet && (
+        <div className="px-3 py-1.5 border-b border-border bg-muted/20 flex items-center gap-2">
+          <BookmarkPlus size={12} className="text-primary flex-shrink-0" />
+          <input
+            type="text"
+            value={saveSnippetName}
+            onChange={(e) => setSaveSnippetName(e.target.value)}
+            placeholder={t('editor.snippetName')}
+            className="flex-1 h-6 px-2 text-xs rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSnippet(); if (e.key === 'Escape') setShowSaveSnippet(false); }}
+            autoFocus
+          />
+          <Button size="sm" className="h-6 text-xs px-2" onClick={handleSaveSnippet}>{t('common.save')}</Button>
+          <Button variant="ghost" size="sm" className="h-6 text-xs px-2" onClick={() => setShowSaveSnippet(false)}>{t('common.cancel')}</Button>
+        </div>
+      )}
       <div className="min-h-0 overflow-hidden" style={{ flex: '1 1 0%' }}>
         <ResultPanel results={results} isExecuting={isExecuting} />
       </div>

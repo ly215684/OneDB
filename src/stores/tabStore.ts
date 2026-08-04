@@ -1,5 +1,7 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { Tab, TabType } from '../types/tab';
+import { tauriStorage } from './tauriStorage';
 
 interface TabState {
   tabs: Tab[];
@@ -28,9 +30,11 @@ const TAB_ICONS: Record<TabType, string> = {
   'welcome': '🏠',
 };
 
-export const useTabStore = create<TabState>()((set, get) => ({
-  tabs: [],
-  activeTabId: null,
+export const useTabStore = create<TabState>()(
+  persist(
+    (set, get) => ({
+      tabs: [],
+      activeTabId: null,
 
   addTab: (tabData) => {
     const id = generateTabId();
@@ -108,4 +112,15 @@ export const useTabStore = create<TabState>()((set, get) => ({
   },
 
   getActiveTab: () => get().tabs.find((t) => t.id === get().activeTabId),
-}));
+    }),
+    {
+      name: 'onedb-tabs',
+      storage: createJSONStorage(() => tauriStorage),
+      // Only persist tabs and activeTabId, skip transient state
+      partialize: (state) => ({
+        tabs: state.tabs.map((t) => ({ ...t, isActive: t.id === state.activeTabId })),
+        activeTabId: state.activeTabId,
+      }),
+    }
+  )
+);
