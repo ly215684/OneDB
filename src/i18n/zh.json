@@ -512,7 +512,27 @@
     "syncFailed": "同步失败",
     "exportSuccess": "成功导出 {{count}} 张表",
     "importSuccess": "成功导入 {{count}} 条记录到 {{table}}",
-    "syncSuccess": "成功同步 {{count}} 条记录"
+    "syncSuccess": "成功同步 {{count}} 条记录",
+    "syncProgress": "{{current}}/{{total}}",
+    "schemaDiff": "结构对比"
+  },
+  "schemaDiff": {
+    "compare": "开始对比",
+    "comparing": "对比中...",
+    "results": "共 {{total}} 张表",
+    "onlyInSource": "仅源库有",
+    "onlyInTarget": "仅目标库有",
+    "modified": "有差异",
+    "identical": "完全一致",
+    "migrationSQL": "迁移 SQL",
+    "copySQL": "复制",
+    "executeSQL": "执行",
+    "sqlCopied": "SQL 已复制到剪贴板",
+    "compareComplete": "对比完成：共 {{total}} 张表，{{changed}} 张有差异",
+    "compareFailed": "对比失败",
+    "noExecutableSQL": "没有可执行的 SQL 语句",
+    "executeComplete": "执行完成：{{count}} 条语句成功",
+    "executeFailed": "执行失败"
   },
   "driver": {
     "count": "{{count}} 个驱动",

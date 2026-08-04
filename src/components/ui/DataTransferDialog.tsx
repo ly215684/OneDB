@@ -14,18 +14,25 @@ import {
   FileCode,
   CheckCircle,
   AlertCircle,
+  GitCompare,
+  Plus,
+  Minus,
+  ArrowLeftRight,
+  Loader2,
+  Copy,
+  Play,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { exportData, downloadFile, type ExportFormat } from '../../services/exportService';
 import { importFromFile, type ImportFormat } from '../../services/importService';
-import { executeQuery } from '../../services/connectionService';
+import { executeQuery, getTableStructure } from '../../services/connectionService';
 
 interface DataTransferDialogProps {
   open: boolean;
   onClose: () => void;
 }
 
-type TransferMode = 'export' | 'import' | 'sync';
+type TransferMode = 'export' | 'import' | 'sync' | 'schema-diff';
 
 // ─── Export Panel ───────────────────────────────────────────────
 
@@ -448,6 +455,7 @@ function SyncPanel({
   const [targetDb, setTargetDb] = useState('');
   const [objects, setObjects] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, currentTable: '' });
 
   const sourceConnection = connections.find((c) => c.id === sourceConn);
   const sourceDatabases = sourceConnection?.databases || [];
@@ -469,10 +477,13 @@ function SyncPanel({
   const handleSync = async () => {
     if (!sourceConn || !sourceDb || !targetConn || !targetDb || objects.size === 0) return;
     setSyncing(true);
+    const selectedTables = Array.from(objects);
+    setSyncProgress({ current: 0, total: selectedTables.length, currentTable: '' });
     try {
-      const selectedTables = Array.from(objects);
       let successCount = 0;
-      for (const table of selectedTables) {
+      for (let i = 0; i < selectedTables.length; i++) {
+        const table = selectedTables[i];
+        setSyncProgress({ current: i + 1, total: selectedTables.length, currentTable: table });
         const isSourceMongo = sourceConnection?.type === 'mongodb' || sourceConnection?.type === 'mongodb_srv';
         const query = isSourceMongo
           ? JSON.stringify({ collection: table, filter: {}, limit: 100000, skip: 0 })
@@ -509,6 +520,7 @@ function SyncPanel({
       onDone(`${t('transfer.syncFailed')}: ${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
       setSyncing(false);
+      setSyncProgress({ current: 0, total: 0, currentTable: '' });
     }
   };
 
@@ -603,6 +615,22 @@ function SyncPanel({
         </div>
       )}
 
+      {/* Progress */}
+      {syncing && syncProgress.total > 0 && (
+        <div className="space-y-1">
+          <div className="flex justify-between text-2xs text-muted-foreground">
+            <span>{t('transfer.syncProgress', { current: syncProgress.current, total: syncProgress.total })}</span>
+            <span className="truncate max-w-[150px]">{syncProgress.currentTable}</span>
+          </div>
+          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary transition-all duration-300"
+              style={{ width: `${(syncProgress.current / syncProgress.total) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Action */}
       <div className="flex justify-end pt-2">
         <Button
@@ -613,6 +641,349 @@ function SyncPanel({
           {syncing ? t('transfer.syncing') : t('transfer.startSync')}
         </Button>
       </div>
+    </div>
+  );
+}
+
+// ─── Schema Diff Types & Helpers ─────────────────────────────────
+
+type ColumnDiff = {
+  column: string;
+  status: 'added' | 'removed' | 'modified';
+  sourceDef?: string;
+  targetDef?: string;
+};
+
+type TableDiff = {
+  table: string;
+  status: 'source-only' | 'target-only' | 'modified' | 'identical';
+  columnDiffs: ColumnDiff[];
+};
+
+function quoteIdent(name: string, dbType: string): string {
+  if (dbType === 'mysql' || dbType === 'mariadb') return `\`${name}\``;
+  return `"${name}"`;
+}
+
+function colDefStr(col: { name: string; type: string; nullable: boolean; default_value: string | null; primary_key: boolean }): string {
+  let s = `${col.name} ${col.type}`;
+  if (!col.nullable) s += ' NOT NULL';
+  if (col.default_value) s += ` DEFAULT ${col.default_value}`;
+  if (col.primary_key) s += ' PRIMARY KEY';
+  return s;
+}
+
+function generateMigrationSQL(
+  diffs: TableDiff[],
+  targetType: string,
+): string {
+  const q = (n: string) => quoteIdent(n, targetType);
+  const stmts: string[] = [];
+
+  for (const diff of diffs) {
+    if (diff.status === 'source-only') {
+      // Generate CREATE TABLE placeholder
+      stmts.push(`-- CREATE TABLE ${q(diff.table)} (structure from source)`);
+      stmts.push(`-- TODO: Generate full CREATE TABLE from source DDL`);
+    } else if (diff.status === 'modified') {
+      for (const col of diff.columnDiffs) {
+        if (col.status === 'added' && col.sourceDef) {
+          stmts.push(`ALTER TABLE ${q(diff.table)} ADD COLUMN ${q(col.column)} ${col.sourceDef};`);
+        } else if (col.status === 'removed') {
+          stmts.push(`ALTER TABLE ${q(diff.table)} DROP COLUMN ${q(col.column)};`);
+        } else if (col.status === 'modified' && col.sourceDef) {
+          if (targetType === 'mysql' || targetType === 'mariadb') {
+            stmts.push(`ALTER TABLE ${q(diff.table)} MODIFY COLUMN ${q(col.column)} ${col.sourceDef};`);
+          } else if (targetType === 'postgresql') {
+            // PostgreSQL uses ALTER COLUMN ... TYPE / SET NOT NULL / DROP NOT NULL separately
+            stmts.push(`-- ALTER TABLE ${q(diff.table)} ALTER COLUMN ${q(col.column)} TYPE ... (check manually)`);
+          } else {
+            stmts.push(`-- ALTER TABLE ${q(diff.table)} ALTER COLUMN ${q(col.column)} ${col.sourceDef};`);
+          }
+        }
+      }
+    }
+  }
+  return stmts.join('\n');
+}
+
+// ─── Schema Diff Panel ──────────────────────────────────────────
+
+function SchemaDiffPanel({
+  connections,
+  onDone,
+}: {
+  connections: ReturnType<typeof useConnectionStore.getState>['connections'];
+  onDone: (msg: string, type: 'success' | 'error') => void;
+}) {
+  const { t } = useTranslation();
+  const [sourceConn, setSourceConn] = useState('');
+  const [sourceDb, setSourceDb] = useState('');
+  const [targetConn, setTargetConn] = useState('');
+  const [targetDb, setTargetDb] = useState('');
+  const [comparing, setComparing] = useState(false);
+  const [diffs, setDiffs] = useState<TableDiff[] | null>(null);
+  const [generatedSQL, setGeneratedSQL] = useState('');
+  const [executing, setExecuting] = useState(false);
+
+  const sourceConnection = connections.find((c) => c.id === sourceConn);
+  const targetConnection = connections.find((c) => c.id === targetConn);
+  const sourceTables = sourceConnection?.databases?.find((db) => db.name === sourceDb)?.tables || [];
+  const targetTables = targetConnection?.databases?.find((db) => db.name === targetDb)?.tables || [];
+
+  const handleCompare = async () => {
+    if (!sourceConn || !sourceDb || !targetConn || !targetDb) return;
+    if (!sourceConnection || !targetConnection) return;
+    setComparing(true);
+    setDiffs(null);
+    setGeneratedSQL('');
+
+    try {
+      const srcTableNames = new Set(sourceTables.map((t) => t.name));
+      const tgtTableNames = new Set(targetTables.map((t) => t.name));
+      const result: TableDiff[] = [];
+
+      // Source-only tables
+      for (const name of srcTableNames) {
+        if (!tgtTableNames.has(name)) {
+          result.push({ table: name, status: 'source-only', columnDiffs: [] });
+        }
+      }
+
+      // Target-only tables
+      for (const name of tgtTableNames) {
+        if (!srcTableNames.has(name)) {
+          result.push({ table: name, status: 'target-only', columnDiffs: [] });
+        }
+      }
+
+      // Common tables - compare columns
+      const commonTables = Array.from(srcTableNames).filter((t) => tgtTableNames.has(t));
+      for (const tableName of commonTables) {
+        try {
+          const [srcStruct, tgtStruct] = await Promise.all([
+            getTableStructure(sourceConnection.type, sourceConnection.config, sourceDb, tableName),
+            getTableStructure(targetConnection.type, targetConnection.config, targetDb, tableName),
+          ]);
+
+          const srcCols = new Map(srcStruct.columns.map((c) => [c.name, c]));
+          const tgtCols = new Map(tgtStruct.columns.map((c) => [c.name, c]));
+          const colDiffs: ColumnDiff[] = [];
+
+          // Columns in source but not in target
+          for (const [name, col] of srcCols) {
+            if (!tgtCols.has(name)) {
+              colDiffs.push({ column: name, status: 'added', sourceDef: colDefStr(col) });
+            }
+          }
+
+          // Columns in target but not in source
+          for (const [name] of tgtCols) {
+            if (!srcCols.has(name)) {
+              colDiffs.push({ column: name, status: 'removed', targetDef: colDefStr(tgtCols.get(name)!) });
+            }
+          }
+
+          // Columns in both - check for type differences
+          for (const [name, srcCol] of srcCols) {
+            const tgtCol = tgtCols.get(name);
+            if (!tgtCol) continue;
+            const srcNorm = srcCol.type.toLowerCase().replace(/\s/g, '');
+            const tgtNorm = tgtCol.type.toLowerCase().replace(/\s/g, '');
+            if (srcNorm !== tgtNorm || srcCol.nullable !== tgtCol.nullable) {
+              colDiffs.push({
+                column: name,
+                status: 'modified',
+                sourceDef: colDefStr(srcCol),
+                targetDef: colDefStr(tgtCol),
+              });
+            }
+          }
+
+          result.push({
+            table: tableName,
+            status: colDiffs.length > 0 ? 'modified' : 'identical',
+            columnDiffs: colDiffs,
+          });
+        } catch {
+          result.push({ table: tableName, status: 'modified', columnDiffs: [{ column: '?', status: 'modified', sourceDef: 'Error fetching structure' }] });
+        }
+      }
+
+      // Sort: source-only first, then modified, then target-only, then identical
+      result.sort((a, b) => {
+        const order = { 'source-only': 0, 'modified': 1, 'target-only': 2, 'identical': 3 };
+        return order[a.status] - order[b.status];
+      });
+
+      setDiffs(result);
+
+      // Auto-generate migration SQL
+      const sql = generateMigrationSQL(result, targetConnection.type);
+      setGeneratedSQL(sql);
+
+      const changedCount = result.filter((d) => d.status !== 'identical').length;
+      onDone(t('schemaDiff.compareComplete', { total: result.length, changed: changedCount }), 'success');
+    } catch (e) {
+      onDone(`${t('schemaDiff.compareFailed')}: ${e instanceof Error ? e.message : String(e)}`, 'error');
+    } finally {
+      setComparing(false);
+    }
+  };
+
+  const handleCopySQL = async () => {
+    if (!generatedSQL) return;
+    await navigator.clipboard.writeText(generatedSQL);
+    onDone(t('schemaDiff.sqlCopied'), 'success');
+  };
+
+  const handleExecuteSQL = async () => {
+    if (!generatedSQL || !targetConnection || !targetDb) return;
+    setExecuting(true);
+    try {
+      const statements = generatedSQL.split('\n').filter((s) => s.trim() && !s.startsWith('--'));
+      if (statements.length === 0) {
+        onDone(t('schemaDiff.noExecutableSQL'), 'error');
+        return;
+      }
+      let successCount = 0;
+      for (const stmt of statements) {
+        const res = await executeQuery(targetConnection.type, targetConnection.config, stmt, targetDb);
+        if (!res.error) successCount++;
+      }
+      onDone(t('schemaDiff.executeComplete', { count: successCount }), 'success');
+    } catch (e) {
+      onDone(`${t('schemaDiff.executeFailed')}: ${e instanceof Error ? e.message : String(e)}`, 'error');
+    } finally {
+      setExecuting(false);
+    }
+  };
+
+  const statusIcon = (status: string) => {
+    switch (status) {
+      case 'source-only': return <Plus size={12} className="text-green-500" />;
+      case 'target-only': return <Minus size={12} className="text-red-500" />;
+      case 'modified': return <ArrowLeftRight size={12} className="text-yellow-500" />;
+      case 'identical': return <CheckCircle size={12} className="text-green-400" />;
+      default: return null;
+    }
+  };
+
+  const statusLabel = (status: string) => {
+    switch (status) {
+      case 'source-only': return t('schemaDiff.onlyInSource');
+      case 'target-only': return t('schemaDiff.onlyInTarget');
+      case 'modified': return t('schemaDiff.modified');
+      case 'identical': return t('schemaDiff.identical');
+      default: return status;
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Source & Target */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-muted-foreground">{t('transfer.sourceConnection')}</label>
+          <Select value={sourceConn} onChange={(e) => { setSourceConn(e.target.value); setSourceDb(''); setDiffs(null); }}
+            options={[{ value: '', label: t('transfer.selectConnection') }, ...connections.map((c) => ({ value: c.id, label: c.name }))]}
+          />
+          {sourceConn && (
+            <Select value={sourceDb} onChange={(e) => { setSourceDb(e.target.value); setDiffs(null); }}
+              options={[{ value: '', label: t('transfer.selectDatabase') }, ...(sourceConnection?.databases || []).map((db) => ({ value: db.name, label: db.name }))]}
+            />
+          )}
+        </div>
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-muted-foreground">{t('transfer.targetConnection')}</label>
+          <Select value={targetConn} onChange={(e) => { setTargetConn(e.target.value); setTargetDb(''); setDiffs(null); }}
+            options={[{ value: '', label: t('transfer.selectConnection') }, ...connections.map((c) => ({ value: c.id, label: c.name }))]}
+          />
+          {targetConn && (
+            <Select value={targetDb} onChange={(e) => { setTargetDb(e.target.value); setDiffs(null); }}
+              options={[{ value: '', label: t('transfer.selectDatabase') }, ...(targetConnection?.databases || []).map((db) => ({ value: db.name, label: db.name }))]}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Compare Button */}
+      <div className="flex justify-center">
+        <Button onClick={handleCompare} disabled={!sourceConn || !sourceDb || !targetConn || !targetDb || comparing}>
+          {comparing ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <GitCompare size={14} className="mr-1.5" />}
+          {comparing ? t('schemaDiff.comparing') : t('schemaDiff.compare')}
+        </Button>
+      </div>
+
+      {/* Diff Results */}
+      {diffs && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">
+              {t('schemaDiff.results', { total: diffs.length })}
+            </span>
+            <div className="flex gap-3 text-2xs">
+              <span className="flex items-center gap-1"><Plus size={10} className="text-green-500" />{diffs.filter((d) => d.status === 'source-only').length} {t('schemaDiff.onlyInSource')}</span>
+              <span className="flex items-center gap-1"><ArrowLeftRight size={10} className="text-yellow-500" />{diffs.filter((d) => d.status === 'modified').length} {t('schemaDiff.modified')}</span>
+              <span className="flex items-center gap-1"><Minus size={10} className="text-red-500" />{diffs.filter((d) => d.status === 'target-only').length} {t('schemaDiff.onlyInTarget')}</span>
+            </div>
+          </div>
+
+          <div className="border border-border rounded-lg max-h-60 overflow-y-auto">
+            {diffs.map((diff) => (
+              <div key={diff.table} className={clsx(
+                'border-b border-border last:border-b-0 px-3 py-2',
+                diff.status === 'source-only' && 'bg-green-50/50 dark:bg-green-950/20',
+                diff.status === 'target-only' && 'bg-red-50/50 dark:bg-red-950/20',
+                diff.status === 'modified' && 'bg-yellow-50/50 dark:bg-yellow-950/20',
+              )}>
+                <div className="flex items-center gap-2">
+                  {statusIcon(diff.status)}
+                  <span className="text-xs font-medium flex-1">{diff.table}</span>
+                  <span className="text-2xs text-muted-foreground">{statusLabel(diff.status)}</span>
+                </div>
+                {diff.columnDiffs.length > 0 && (
+                  <div className="ml-5 mt-1 space-y-0.5">
+                    {diff.columnDiffs.map((col, i) => (
+                      <div key={i} className="flex items-center gap-2 text-2xs">
+                        {col.status === 'added' && <Plus size={8} className="text-green-500" />}
+                        {col.status === 'removed' && <Minus size={8} className="text-red-500" />}
+                        {col.status === 'modified' && <ArrowLeftRight size={8} className="text-yellow-500" />}
+                        <span className="font-mono">{col.column}</span>
+                        {col.sourceDef && <span className="text-green-600 dark:text-green-400">{col.sourceDef}</span>}
+                        {col.status === 'modified' && col.targetDef && (
+                          <><span className="text-muted-foreground">←</span><span className="text-red-500 line-through">{col.targetDef}</span></>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Generated SQL */}
+      {generatedSQL && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">{t('schemaDiff.migrationSQL')}</span>
+            <div className="flex gap-1">
+              <Button variant="ghost" size="sm" onClick={handleCopySQL}>
+                <Copy size={12} className="mr-1" />{t('schemaDiff.copySQL')}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleExecuteSQL} disabled={executing}>
+                {executing ? <Loader2 size={12} className="mr-1 animate-spin" /> : <Play size={12} className="mr-1" />}
+                {t('schemaDiff.executeSQL')}
+              </Button>
+            </div>
+          </div>
+          <pre className="text-2xs font-mono bg-muted p-3 rounded-lg overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap">
+            {generatedSQL}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
@@ -634,6 +1005,7 @@ export function DataTransferDialog({ open, onClose }: DataTransferDialogProps) {
     { id: 'export' as const, label: t('editor.export'), icon: Download },
     { id: 'import' as const, label: t('table.import'), icon: Upload },
     { id: 'sync' as const, label: t('transfer.sync'), icon: RefreshCw },
+    { id: 'schema-diff' as const, label: t('transfer.schemaDiff'), icon: GitCompare },
   ];
 
   return (
@@ -665,6 +1037,7 @@ export function DataTransferDialog({ open, onClose }: DataTransferDialogProps) {
         {mode === 'export' && <ExportPanel connections={connections} onDone={handleDone} />}
         {mode === 'import' && <ImportPanel connections={connections} onDone={handleDone} />}
         {mode === 'sync' && <SyncPanel connections={connections} onDone={handleDone} />}
+        {mode === 'schema-diff' && <SchemaDiffPanel connections={connections} onDone={handleDone} />}
 
         {/* Result Message */}
         {resultMsg && (

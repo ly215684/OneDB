@@ -512,7 +512,27 @@
     "syncFailed": "Sync failed",
     "exportSuccess": "Successfully exported {{count}} table(s)",
     "importSuccess": "Successfully imported {{count}} record(s) into {{table}}",
-    "syncSuccess": "Successfully synced {{count}} record(s)"
+    "syncSuccess": "Successfully synced {{count}} record(s)",
+    "syncProgress": "{{current}}/{{total}}",
+    "schemaDiff": "Schema Diff"
+  },
+  "schemaDiff": {
+    "compare": "Compare",
+    "comparing": "Comparing...",
+    "results": "{{total}} tables total",
+    "onlyInSource": "Source only",
+    "onlyInTarget": "Target only",
+    "modified": "Modified",
+    "identical": "Identical",
+    "migrationSQL": "Migration SQL",
+    "copySQL": "Copy",
+    "executeSQL": "Execute",
+    "sqlCopied": "SQL copied to clipboard",
+    "compareComplete": "Compare complete: {{total}} tables, {{changed}} with differences",
+    "compareFailed": "Compare failed",
+    "noExecutableSQL": "No executable SQL statements",
+    "executeComplete": "Execute complete: {{count}} statements succeeded",
+    "executeFailed": "Execute failed"
   },
   "driver": {
     "count": "{{count}} drivers",
