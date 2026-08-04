@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useTabStore } from '../stores/tabStore';
 import { DATABASE_TYPES } from '../types/connection';
-import { listDatabases, executeQuery } from '../services/connectionService';
+import { listDatabases, executeQuery, getTableDDL } from '../services/connectionService';
 import { exportData, downloadFile, type ExportFormat } from '../services/exportService';
 import { importFromFile, type ImportFormat } from '../services/importService';
 import { ConnectionDialog } from '../components/connection/ConnectionDialog';
@@ -128,6 +128,17 @@ export function Sidebar({ width = 260 }: SidebarProps) {
     });
   };
 
+  const openRedisKeyBrowser = (connId: string, dbName: string) => {
+    addTab({
+      type: 'redis-keys',
+      title: `${dbName} ${t('redis.keys')}`,
+      icon: '🔑',
+      connectionId: connId,
+      database: dbName,
+      data: {},
+    });
+  };
+
   const handleContextMenu = (e: React.MouseEvent, connectionId: string) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY, connectionId });
@@ -230,6 +241,19 @@ export function Sidebar({ width = 260 }: SidebarProps) {
   const isRedisOrSqlite = (type: string) => type === 'redis' || type === 'sqlite' || type === 'duckdb';
   const isMongoDB = (type: string) => type === 'mongodb' || type === 'mongodb_srv';
   const supportsTableStructure = (type: string) => !isRedis(type) && !isMongoDB(type);
+  const supportsDDL = (type: string) => !isRedis(type) && !isMongoDB(type);
+
+  const handleCopyDDL = async (connId: string, dbName: string, tableName: string) => {
+    const conn = getConnection(connId);
+    if (!conn) return;
+    try {
+      const ddl = await getTableDDL(conn.type, conn.config, dbName, tableName);
+      await navigator.clipboard.writeText(ddl);
+      message.success(t('sidebar.ddlCopied'));
+    } catch (e) {
+      message.error(`${t('sidebar.ddlFailed')}: ${e}`);
+    }
+  };
 
   const handleDeleteDatabase = async (connId: string, dbName: string) => {
     const conn = getConnection(connId);
@@ -638,6 +662,9 @@ export function Sidebar({ width = 260 }: SidebarProps) {
                             <div
                               className="flex items-center gap-1.5 px-2 py-0.5 cursor-pointer hover:bg-hover rounded-sm mx-1 text-xs min-w-0"
                               onClick={() => toggleGroup(`${conn.id}-${db.name}`)}
+                              onDoubleClick={() => {
+                                if (conn.type === 'redis') openRedisKeyBrowser(conn.id, db.name);
+                              }}
                               onContextMenu={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -847,6 +874,12 @@ export function Sidebar({ width = 260 }: SidebarProps) {
               hidden: !supportsTableStructure(objectMenu.connType),
             },
             {
+              label: t('sidebar.copyDDL'),
+              icon: <Code size={12} />,
+              onClick: () => handleCopyDDL(objectMenu.connId, objectMenu.database || '', objectMenu.tableName),
+              hidden: !supportsDDL(objectMenu.connType),
+            },
+            {
               label: t('sidebar.generateSql'),
               icon: <FileText size={12} />,
               onClick: () => {
@@ -882,6 +915,22 @@ export function Sidebar({ width = 260 }: SidebarProps) {
               icon: <Trash size={12} />,
               danger: true,
               onClick: () => handleDeleteTable(objectMenu.connId, objectMenu.database || '', objectMenu.tableName),
+            },
+          ]}
+        />
+      )}
+
+      {/* Database Context Menu (Redis) */}
+      {dbMenu && isRedis(dbMenu.connType) && (
+        <ContextMenu
+          x={dbMenu.x}
+          y={dbMenu.y}
+          onClose={() => setDbMenu(null)}
+          items={[
+            {
+              label: t('redis.browseKeys'),
+              icon: <Key size={12} />,
+              onClick: () => openRedisKeyBrowser(dbMenu.connId, dbMenu.dbName),
             },
           ]}
         />

@@ -295,3 +295,79 @@ export async function getERData(
     database,
   });
 }
+
+// Get table DDL (CREATE TABLE statement)
+export async function getTableDDL(
+  type: DatabaseType,
+  config: ConnectionConfig,
+  database: string,
+  table: string
+): Promise<string> {
+  return await invoke<string>('get_table_ddl', {
+    dbType: type,
+    config: config as Record<string, unknown>,
+    database,
+    table,
+  });
+}
+
+// ─── Redis key browser ────────────────────────────────────────────
+
+export interface RedisKeyInfo {
+  key: string;
+  type: string;
+  ttl: number;
+  value: unknown;
+}
+
+export async function redisScanKeys(
+  config: ConnectionConfig,
+  database?: number,
+  pattern?: string,
+  limit?: number
+): Promise<string[]> {
+  return await invoke<string[]>('redis_scan_keys', {
+    config: config as Record<string, unknown>,
+    database: database ?? null,
+    pattern: pattern ?? null,
+    limit: limit ?? null,
+  });
+}
+
+export async function redisGetKey(
+  config: ConnectionConfig,
+  database: number | undefined,
+  key: string
+): Promise<RedisKeyInfo> {
+  return await invoke<RedisKeyInfo>('redis_get_key', {
+    config: config as Record<string, unknown>,
+    database: database ?? null,
+    key,
+  });
+}
+
+export async function redisDeleteKeys(
+  config: ConnectionConfig,
+  database: number | undefined,
+  keys: string[]
+): Promise<number> {
+  return await invoke<number>('redis_delete_key', {
+    config: config as Record<string, unknown>,
+    database: database ?? null,
+    keys,
+  });
+}
+
+export async function redisSetKey(
+  config: ConnectionConfig,
+  database: number | undefined,
+  key: string,
+  value: string
+): Promise<void> {
+  return await invoke<void>('redis_set_key', {
+    config: config as Record<string, unknown>,
+    database: database ?? null,
+    key,
+    value,
+  });
+}

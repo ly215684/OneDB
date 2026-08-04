@@ -1,18 +1,20 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CodeMirrorEditor } from './CodeMirrorEditor';
+import { CodeMirrorEditor, type EditorApi } from './CodeMirrorEditor';
 import { ResultPanel } from './ResultPanel';
 import { useQueryHistoryStore } from '../../stores/queryHistoryStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { useTabStore } from '../../stores/tabStore';
 import type { QueryResult } from '../../types/connection';
 import { executeQuery, listDatabases } from '../../services/connectionService';
-import { Play, PlaySquare, Eraser, Clock, ArrowDownToLine, Database, ChevronDown, Server } from 'lucide-react';
+import { Play, PlaySquare, Eraser, Clock, ArrowDownToLine, Database, ChevronDown, Server, Wand2, FileSearch } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Tooltip } from '../ui/Tooltip';
 import { DropdownMenu } from '../ui/DropdownMenu';
-import { exportToFile } from '../../services/exportService';
+import { useMessage } from '../ui/Message';
+import { exportToFile, type ExportFormat } from '../../services/exportService';
 import { splitSqlStatements } from '../../utils/sqlSplitter';
+import { formatSql } from '../../utils/sqlFormatter';
 import { useSettingsStore } from '../../stores/settingsStore';
 
 interface SQLEditorProps {
@@ -25,6 +27,9 @@ interface SQLEditorProps {
 export function SQLEditor({ tabId, connectionId, database: initialDatabase, initialSql = '' }: SQLEditorProps) {
   const { t } = useTranslation();
   const executeSqlShortcut = useSettingsStore((s) => s.shortcuts.executeSql);
+  const formatSqlShortcut = useSettingsStore((s) => s.shortcuts.formatSql);
+  const msg = useMessage();
+  const editorApi = useRef<EditorApi | null>(null);
   const [sql, setSql] = useState(initialSql);
   const [results, setResults] = useState<QueryResult[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
@@ -165,7 +170,54 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
   }, [activeConnId, selectedDb, addHistory, getConnection, t]);
 
   const handleClear = () => { setSql(''); setResults([]); };
-  const handleExport = (format: 'csv' | 'json' | 'sql-insert') => {
+
+  // Execute only the selected text (falls back to whole editor if nothing selected)
+  const handleExecuteSelected = useCallback(() => {
+    const api = editorApi.current;
+    const selected = api?.hasSelection() ? api.getSelectedText() : '';
+    if (!selected.trim()) {
+      msg.info(t('editor.noSelection'));
+      return;
+    }
+    handleExecute(selected, true);
+  }, [handleExecute, msg, t]);
+
+  // Format SQL: format the selection if any, otherwise the whole editor
+  const handleFormat = useCallback(() => {
+    const api = editorApi.current;
+    if (!api) return;
+    if (api.hasSelection()) {
+      const formatted = formatSql(api.getSelectedText());
+      api.replaceSelection(formatted);
+      setSql(api.getText());
+    } else {
+      const formatted = formatSql(api.getText());
+      api.replaceText(formatted);
+      setSql(formatted);
+    }
+  }, []);
+
+  // EXPLAIN the current selection (or the first statement)
+  const handleExplain = useCallback(() => {
+    const api = editorApi.current;
+    const text = api?.hasSelection() ? api.getSelectedText() : sql;
+    const trimmed = text.trim().replace(/;\s*$/, '');
+    if (!trimmed) return;
+    const conn = activeConnId ? getConnection(activeConnId) : undefined;
+    if (!conn) {
+      msg.error(t('editor.noConnection'));
+      return;
+    }
+    if (conn.type === 'redis' || conn.type === 'mongodb' || conn.type === 'mongodb_srv') {
+      msg.info(t('editor.explainUnsupported'));
+      return;
+    }
+    const firstStmt = splitSqlStatements(trimmed)[0] || trimmed;
+    const explainSql = /^\s*explain\b/i.test(firstStmt) ? firstStmt : `EXPLAIN ${firstStmt}`;
+    handleExecute(explainSql, false);
+  }, [sql, activeConnId, getConnection, handleExecute, msg, t]);
+
+  const handleExport = (format: ExportFormat) => {
     // Export the last successful result
     const lastSuccess = [...results].reverse().find(r => r.success);
     if (lastSuccess) exportToFile(lastSuccess, format, 'query_result');
@@ -228,7 +280,13 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
           </Button>
         </Tooltip>
         <Tooltip content={t('editor.executeSelected')}>
-          <Button variant="ghost" size="icon" className="h-7 w-7"><PlaySquare size={14} /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleExecuteSelected}><PlaySquare size={14} /></Button>
+        </Tooltip>
+        <Tooltip content={`${t('editor.format')} (${formatSqlShortcut})`}>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleFormat}><Wand2 size={14} /></Button>
+        </Tooltip>
+        <Tooltip content={t('editor.explain')}>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleExplain}><FileSearch size={14} /></Button>
         </Tooltip>
         <div className="w-px h-5 bg-border mx-1" />
         <Tooltip content={t('editor.clear')}>
@@ -244,6 +302,7 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
               { label: t('table.exportCsv'), onClick: () => handleExport('csv') },
               { label: t('table.exportJson'), onClick: () => handleExport('json') },
               { label: t('table.exportSql'), onClick: () => handleExport('sql-insert') },
+              { label: t('table.exportXlsx'), onClick: () => handleExport('xlsx') },
             ]}
             trigger={<Tooltip content={t('editor.export')}><Button variant="ghost" size="icon" className="h-7 w-7"><ArrowDownToLine size={14} /></Button></Tooltip>}
           />
@@ -251,7 +310,7 @@ export function SQLEditor({ tabId, connectionId, database: initialDatabase, init
       </div>
       <div className="flex-1 min-h-0 flex" style={{ flex: showHistory ? '2 1 0%' : '1 1 0%' }}>
         <div className="flex-1">
-          <CodeMirrorEditor value={sql} onChange={setSql} onExecute={handleExecute} placeholder={editorPlaceholder} isMongo={isMongo} />
+          <CodeMirrorEditor value={sql} onChange={setSql} onExecute={handleExecute} onFormat={handleFormat} apiRef={editorApi} placeholder={editorPlaceholder} isMongo={isMongo} />
         </div>
         {showHistory && (
           <div className="w-64 border-l border-border flex flex-col">

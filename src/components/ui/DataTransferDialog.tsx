@@ -40,7 +40,7 @@ function ExportPanel({
   const [sourceConn, setSourceConn] = useState('');
   const [sourceDb, setSourceDb] = useState('');
   const [objects, setObjects] = useState<Set<string>>(new Set());
-  const [format, setFormat] = useState<ExportFormat>('sql-insert');
+  const [format, setFormat] = useState<Exclude<ExportFormat, 'xlsx'>>('sql-insert');
   const [exporting, setExporting] = useState(false);
 
   const sourceConnection = connections.find((c) => c.id === sourceConn);
@@ -84,12 +84,12 @@ function ExportPanel({
           continue;
         }
         const content = exportData(result, format, table);
-        const extensions: Record<ExportFormat, string> = {
+        const extensions: Record<Exclude<ExportFormat, 'xlsx'>, string> = {
           csv: 'csv',
           json: 'json',
           'sql-insert': 'sql',
         };
-        const mimeTypes: Record<ExportFormat, string> = {
+        const mimeTypes: Record<Exclude<ExportFormat, 'xlsx'>, string> = {
           csv: 'text/csv',
           json: 'application/json',
           'sql-insert': 'text/plain',

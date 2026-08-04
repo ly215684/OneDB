@@ -1,6 +1,7 @@
 import type { QueryResult } from '../types/connection';
+import * as XLSX from 'xlsx';
 
-export type ExportFormat = 'csv' | 'json' | 'sql-insert';
+export type ExportFormat = 'csv' | 'json' | 'sql-insert' | 'xlsx';
 
 export function exportData(
   data: QueryResult,
@@ -14,6 +15,9 @@ export function exportData(
       return exportToJSON(data);
     case 'sql-insert':
       return exportToSQLInsert(data, tableName);
+    case 'xlsx':
+      // xlsx is binary; handled separately in exportToFile
+      return '';
     default:
       throw new Error(`Unsupported export format: ${format}`);
   }
@@ -114,17 +118,38 @@ export function exportToFile(
   format: ExportFormat,
   tableName: string = 'table'
 ): void {
+  if (format === 'xlsx') {
+    exportToXLSX(data, tableName);
+    return;
+  }
   const content = exportData(data, format, tableName);
-  const extensions: Record<ExportFormat, string> = {
+  const extensions: Record<Exclude<ExportFormat, 'xlsx'>, string> = {
     csv: 'csv',
     json: 'json',
     'sql-insert': 'sql',
   };
-  const mimeTypes: Record<ExportFormat, string> = {
+  const mimeTypes: Record<Exclude<ExportFormat, 'xlsx'>, string> = {
     csv: 'text/csv',
     json: 'application/json',
     'sql-insert': 'text/plain',
   };
   const filename = `${tableName}_${Date.now()}.${extensions[format]}`;
   downloadFile(content, filename, mimeTypes[format]);
+}
+
+function exportToXLSX(data: QueryResult, tableName: string): void {
+  const rows = (data.rows || []).map((row) => {
+    const obj: Record<string, unknown> = {};
+    (data.columns || []).forEach((col) => {
+      const v = row[col];
+      obj[col] = typeof v === 'object' && v !== null ? JSON.stringify(v) : v;
+    });
+    return obj;
+  });
+  const ws = XLSX.utils.json_to_sheet(rows, { header: data.columns || [] });
+  const wb = XLSX.utils.book_new();
+  // Sheet names must not contain []:*?/\
+  const sheetName = (tableName || 'Result').replace(/[\[\]:*?/\\]/g, '_').slice(0, 31) || 'Result';
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  XLSX.writeFile(wb, `${tableName}_${Date.now()}.xlsx`);
 }

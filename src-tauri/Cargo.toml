@@ -27,11 +27,17 @@ tokio = { version = "1", features = ["full"] }
 # Database drivers
 mysql_async = "0.34"
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+tokio-postgres-rustls = "0.12"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 duckdb = { version = "1", features = ["bundled"] }
 mongodb = "2"
 redis = { version = "0.25", features = ["tokio-comp"] }
 futures = "0.3"
+
+# Connection pool management
+dashmap = "6"
+
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-dialog = "2"

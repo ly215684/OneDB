@@ -24,6 +24,7 @@ const TAB_ICONS: Record<TabType, string> = {
   'table-structure': '🏗️',
   'er-diagram': '🔗',
   'mongodb-docs': '🍃',
+  'redis-keys': '🔑',
   'welcome': '🏠',
 };
 

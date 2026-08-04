@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { executeQuery } from '../../services/connectionService';
-import { exportToFile, exportData } from '../../services/exportService';
+import { exportToFile, exportData, type ExportFormat } from '../../services/exportService';
 import { useDragScroll } from '../../hooks/useDragScroll';
 import { Button } from '../ui/Button';
 import { DropdownMenu, ContextMenu } from '../ui/DropdownMenu';
@@ -49,6 +49,20 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   const dragScrollRef = useDragScroll(false);
   const msg = useMessage();
 
+  // Escape a table/column identifier per dialect to avoid injection via names
+  const quoteIdent = (name: string): string => {
+    if (conn?.type === 'mysql' || conn?.type === 'mariadb') {
+      return '`' + name.replace(/`/g, '``') + '`';
+    }
+    return '"' + name.replace(/"/g, '""') + '"';
+  };
+
+  // Cached total row count (recount only on manual refresh)
+  const countCacheRef = useRef<number | null>(null);
+  useEffect(() => {
+    countCacheRef.current = null;
+  }, [tableName, database, connectionId]);
+
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<RowData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -78,7 +92,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
   const [editingCell, setEditingCell] = useState<{ row: number; col: string } | null>(null);
   const [editValue, setEditValue] = useState('');
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (forceCount = false) => {
     if (!conn) {
       setError('No active connection');
       return;
@@ -92,24 +106,32 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
         query = JSON.stringify({ collection: tableName, operation: 'find', filter: {}, limit: pageSize, skip: (currentPage - 1) * pageSize });
         countQuery = JSON.stringify({ collection: tableName, operation: 'count', filter: {} });
       } else {
-        const parts = [`SELECT * FROM ${tableName}`];
+        const ident = quoteIdent(tableName);
+        const parts = [`SELECT * FROM ${ident}`];
         parts.push(`LIMIT ${pageSize} OFFSET ${(currentPage - 1) * pageSize}`);
         query = parts.join(' ');
-        countQuery = `SELECT COUNT(*) as cnt FROM ${tableName}`;
+        countQuery = `SELECT COUNT(*) as cnt FROM ${ident}`;
       }
+      const needCount = forceCount || countCacheRef.current === null;
       const [result, countResult] = await Promise.all([
         executeQuery(conn.type, conn.config, query, database),
-        executeQuery(conn.type, conn.config, countQuery, database),
+        needCount
+          ? executeQuery(conn.type, conn.config, countQuery, database)
+          : Promise.resolve(null),
       ]);
       if (result.success) {
         setColumns(result.columns);
         setRows(result.rows);
         setDuration(result.duration);
-        // Parse total count
-        if (countResult.success && countResult.rows.length > 0) {
+        // Parse total count (cached across page changes)
+        if (countResult && countResult.success && countResult.rows.length > 0) {
           const row = countResult.rows[0];
           const cnt = isNoSql ? (row['count'] as number) : (row['cnt'] ?? row['COUNT(*)'] ?? Object.values(row)[0]) as number;
-          setTotalRows(Number(cnt) || 0);
+          const total = Number(cnt) || 0;
+          countCacheRef.current = total;
+          setTotalRows(total);
+        } else if (countCacheRef.current !== null) {
+          setTotalRows(countCacheRef.current);
         } else {
           setTotalRows(result.rows.length);
         }
@@ -341,7 +363,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
 
   const [exporting, setExporting] = useState(false);
 
-  const handleExport = async (format: 'csv' | 'json' | 'sql-insert', scope: 'all' | 'page') => {
+  const handleExport = async (format: ExportFormat, scope: 'all' | 'page') => {
     if (scope === 'page') {
       exportToFile(
         { columns, rows: filteredRows, rowCount: filteredRows.length, duration: 0, success: true },
@@ -356,7 +378,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
     try {
       const query = isNoSql
         ? JSON.stringify({ collection: tableName, operation: 'find', filter: {}, limit: 0, skip: 0 })
-        : `SELECT * FROM ${tableName}`;
+        : `SELECT * FROM ${quoteIdent(tableName)}`;
       const result = await executeQuery(conn.type, conn.config, query, database);
       if (result.success) {
         exportToFile(
@@ -374,7 +396,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
     return (
       <div className="h-full flex flex-col items-center justify-center gap-3 p-6">
         <p className="text-sm text-destructive">{error}</p>
-        <Button variant="outline" size="sm" onClick={fetchData}>
+        <Button variant="outline" size="sm" onClick={() => fetchData(true)}>
           <RefreshCw size={14} className="mr-1" />{t('common.retry')}
         </Button>
       </div>
@@ -385,7 +407,7 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
     <div className="h-full flex flex-col">
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-2 py-1.5 border-b border-border bg-toolbar flex-shrink-0">
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fetchData} disabled={loading}>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => fetchData(true)} disabled={loading}>
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </Button>
         <Button variant="ghost" size="icon" className="h-7 w-7"><Plus size={14} /></Button>
@@ -408,10 +430,12 @@ export function DataTableView({ tableName, connectionId, database }: DataTableVi
             { label: t('table.exportAllCsv'), onClick: () => handleExport('csv', 'all') },
             { label: t('table.exportAllJson'), onClick: () => handleExport('json', 'all') },
             { label: t('table.exportAllSql'), onClick: () => handleExport('sql-insert', 'all') },
+            { label: t('table.exportAllXlsx'), onClick: () => handleExport('xlsx', 'all') },
             { separator: true, label: '' },
             { label: t('table.exportPageCsv'), onClick: () => handleExport('csv', 'page') },
             { label: t('table.exportPageJson'), onClick: () => handleExport('json', 'page') },
             { label: t('table.exportPageSql'), onClick: () => handleExport('sql-insert', 'page') },
+            { label: t('table.exportPageXlsx'), onClick: () => handleExport('xlsx', 'page') },
           ]}
           trigger={<Button variant="ghost" size="icon" className="h-7 w-7" disabled={exporting}><ArrowDownToLine size={14} className={exporting ? 'animate-pulse' : ''} /></Button>}
         />

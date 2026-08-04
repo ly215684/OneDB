@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
+import type { MutableRefObject } from 'react';
 import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightActiveLine, placeholder } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import { sql } from '@codemirror/lang-sql';
@@ -155,17 +156,28 @@ interface CodeMirrorEditorProps {
   value: string;
   onChange?: (value: string) => void;
   onExecute?: (sql: string, selectedOnly: boolean) => void;
+  onFormat?: () => void;
   readOnly?: boolean;
   tables?: { name: string; columns: { name: string; type: string }[] }[];
   placeholder?: string;
   isMongo?: boolean;
+  apiRef?: MutableRefObject<EditorApi | null>;
 }
 
-export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false, tables, placeholder: placeholderText, isMongo = false }: CodeMirrorEditorProps) {
+export interface EditorApi {
+  getText: () => string;
+  getSelectedText: () => string;
+  hasSelection: () => boolean;
+  replaceText: (text: string) => void;
+  replaceSelection: (text: string) => void;
+}
+
+export function CodeMirrorEditor({ value, onChange, onExecute, onFormat, readOnly = false, tables, placeholder: placeholderText, isMongo = false, apiRef }: CodeMirrorEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeResolved = useThemeStore((s) => s.resolved);
   const executeSqlShortcut = useSettingsStore((s) => s.shortcuts.executeSql);
+  const formatSqlShortcut = useSettingsStore((s) => s.shortcuts.formatSql);
 
   const getExtensions = useCallback(() => {
     const extensions = [
@@ -203,6 +215,18 @@ export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false,
             return true;
           },
         },
+        ...(onFormat
+          ? [
+              {
+                key: toCodeMirrorKey(formatSqlShortcut),
+                mac: toCodeMirrorKey(formatSqlShortcut).replace('Ctrl', 'Cmd'),
+                run: () => {
+                  onFormat();
+                  return true;
+                },
+              },
+            ]
+          : []),
       ]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && onChange) {
@@ -244,7 +268,7 @@ export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false,
     }
 
     return extensions;
-  }, [onChange, onExecute, readOnly, tables, themeResolved, placeholderText, isMongo, executeSqlShortcut]);
+  }, [onChange, onExecute, onFormat, readOnly, tables, themeResolved, placeholderText, isMongo, executeSqlShortcut, formatSqlShortcut]);
 
   useEffect(() => {
     if (!editorRef.current) return;
@@ -261,8 +285,32 @@ export function CodeMirrorEditor({ value, onChange, onExecute, readOnly = false,
 
     viewRef.current = view;
 
+    if (apiRef) {
+      apiRef.current = {
+        getText: () => view.state.doc.toString(),
+        getSelectedText: () => {
+          const sel = view.state.selection.main;
+          return view.state.doc.sliceString(sel.from, sel.to);
+        },
+        hasSelection: () => {
+          const sel = view.state.selection.main;
+          return sel.from !== sel.to;
+        },
+        replaceText: (text: string) => {
+          view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+        },
+        replaceSelection: (text: string) => {
+          view.dispatch(view.state.changeByRange((range) => ({
+            changes: { from: range.from, to: range.to, insert: text },
+            range,
+          })));
+        },
+      };
+    }
+
     return () => {
       view.destroy();
+      if (apiRef) apiRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getExtensions]);

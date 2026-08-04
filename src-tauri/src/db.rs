@@ -1,5 +1,97 @@
 use serde::Serialize;
 use mysql_async::prelude::Queryable;
+use crate::conn_manager;
+
+// ─── Error sanitization ───────────────────────────────────────────
+
+/// Mask credentials that may leak through driver error messages
+/// (e.g. connection URLs like mysql://user:pass@host).
+pub fn sanitize_error(msg: &str) -> String {
+    let mut out = msg.to_string();
+    // Mask credentials inside URLs: scheme://user:pass@host -> scheme://***@host
+    while let Some(scheme_pos) = out.find("://") {
+        let after = scheme_pos + 3;
+        let rest = &out[after..];
+        let end = rest.find(|c| c == '/' || c == ' ' || c == '\n').unwrap_or(rest.len());
+        let authority = &rest[..end];
+        if let Some(at_pos) = authority.rfind('@') {
+            let cred = &authority[..at_pos];
+            if cred.contains(':') || !cred.is_empty() {
+                let new_authority = format!("***@{}", &authority[at_pos + 1..]);
+                out = format!("{}{}{}", &out[..after], new_authority, &rest[end..]);
+                continue;
+            }
+        }
+        break;
+    }
+    out
+}
+
+/// Shorthand: convert any Display error into a sanitized String.
+pub fn e_str<E: std::fmt::Display>(e: E) -> String {
+    sanitize_error(&e.to_string())
+}
+
+// ─── PostgreSQL TLS ───────────────────────────────────────────────
+
+/// A certificate verifier that accepts any certificate.
+/// Desktop DB clients commonly connect to servers with self-signed certs
+/// when SSL is explicitly requested.
+#[derive(Debug)]
+struct AcceptAnyCertVerifier;
+
+impl rustls::client::danger::ServerCertVerifier for AcceptAnyCertVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls2_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        vec![
+            rustls::SignatureScheme::RSA_PKCS1_SHA1,
+            rustls::SignatureScheme::ECDSA_SHA1_Legacy,
+            rustls::SignatureScheme::RSA_PKCS1_SHA256,
+            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
+            rustls::SignatureScheme::RSA_PKCS1_SHA384,
+            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
+            rustls::SignatureScheme::RSA_PKCS1_SHA512,
+            rustls::SignatureScheme::ECDSA_NISTP521_SHA512,
+            rustls::SignatureScheme::RSA_PSS_SHA256,
+            rustls::SignatureScheme::RSA_PSS_SHA384,
+            rustls::SignatureScheme::RSA_PSS_SHA512,
+            rustls::SignatureScheme::ED25519,
+            rustls::SignatureScheme::ED448,
+        ]
+    }
+}
+
+fn pg_tls_connector() -> Result<tokio_postgres_rustls::MakeRustTlsConnect, String> {
+    let config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(std::sync::Arc::new(AcceptAnyCertVerifier))
+        .with_no_client_auth();
+    Ok(tokio_postgres_rustls::MakeRustTlsConnect::new(config))
+}
+
+/// Whether SSL/TLS is requested for this connection config.
+fn wants_ssl(config: &serde_json::Value) -> bool {
+    config["ssl"].as_bool().unwrap_or(false)
+}
 
 #[derive(Serialize, Clone, Debug)]
 pub struct TableResult {
@@ -124,45 +216,76 @@ pub async fn list_databases_impl(
 
 // ─── MySQL ────────────────────────────────────────────────────────
 
-fn build_mysql_url(config: &serde_json::Value) -> String {
+/// Build MySQL connection options safely (password is never embedded in a URL).
+fn build_mysql_opts(config: &serde_json::Value) -> mysql_async::Opts {
     let host = config["host"].as_str().unwrap_or("localhost");
     let port = config["port"].as_u64().unwrap_or(3306);
     let user = config["username"].as_str().unwrap_or("root");
     let pass = config["password"].as_str().unwrap_or("");
     let db = config["database"].as_str();
 
-    let mut url = format!("mysql://{}:{}@{}:{}", user, pass, host, port);
+    let mut builder = mysql_async::OptsBuilder::default()
+        .ip_or_hostname(host.to_string())
+        .tcp_port(port as u16)
+        .user(Some(user.to_string()))
+        .pass(Some(pass.to_string()));
     if let Some(database) = db {
-        url.push('/');
-        url.push_str(database);
+        if !database.is_empty() {
+            builder = builder.db_name(Some(database.to_string()));
+        }
     }
-    url
+    if wants_ssl(config) {
+        builder = builder.ssl_opts(
+            mysql_async::SslOpts::default().with_danger_accept_invalid_certs(true),
+        );
+    }
+    builder.into()
+}
+
+/// Get a cached MySQL pool for config (+ optional database override).
+async fn mysql_pool(
+    config: &serde_json::Value,
+    database: Option<&str>,
+) -> Result<mysql_async::Pool, String> {
+    let qualifier = database.unwrap_or("");
+    let key = conn_manager::config_key("mysql", config, qualifier);
+    let config = config.clone();
+    let db_owned = database.map(|s| s.to_string());
+    conn_manager::get_mysql_pool(&key, move || {
+        let mut opts: mysql_async::Opts = build_mysql_opts(&config).into();
+        if let Some(db) = db_owned {
+            if !db.is_empty() {
+                opts = mysql_async::OptsBuilder::from_opts(opts)
+                    .db_name(Some(db))
+                    .into();
+            }
+        }
+        Ok(mysql_async::Pool::new(opts))
+    })
+    .await
 }
 
 async fn test_mysql(config: &serde_json::Value) -> Result<String, String> {
-    let url = build_mysql_url(config);
-    let pool = mysql_async::Pool::new(url.as_str());
-    let mut conn = pool.get_conn().await.map_err(|e| e.to_string())?;
+    let pool = mysql_pool(config, None).await?;
+    let mut conn = pool.get_conn().await.map_err(e_str)?;
 
     let version: String = conn
         .query_first("SELECT VERSION()")
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(e_str)?
         .ok_or("Could not retrieve version")?;
 
-    conn.disconnect().await.map_err(|e| e.to_string())?;
     Ok(format!("MySQL {}", version))
 }
 
 async fn list_mysql(config: &serde_json::Value) -> Result<Vec<DatabaseResult>, String> {
-    let url = build_mysql_url(config);
-    let pool = mysql_async::Pool::new(url.as_str());
-    let mut conn = pool.get_conn().await.map_err(|e| e.to_string())?;
+    let pool = mysql_pool(config, None).await?;
+    let mut conn = pool.get_conn().await.map_err(e_str)?;
 
     let db_rows: Vec<(String,)> = conn
         .query("SHOW DATABASES")
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(e_str)?;
 
     let mut databases = Vec::new();
     for (db_name,) in db_rows {
@@ -192,7 +315,6 @@ async fn list_mysql(config: &serde_json::Value) -> Result<Vec<DatabaseResult>, S
         });
     }
 
-    conn.disconnect().await.map_err(|e| e.to_string())?;
     Ok(databases)
 }
 
@@ -216,39 +338,68 @@ fn build_pg_config(config: &serde_json::Value) -> tokio_postgres::Config {
     pg_config
 }
 
-async fn test_postgresql(config: &serde_json::Value) -> Result<String, String> {
-    let pg_config = build_pg_config(config);
-    let (client, connection) = pg_config
-        .connect(tokio_postgres::NoTls)
-        .await
-        .map_err(|e| e.to_string())?;
+/// Connect to PostgreSQL honoring the config's SSL option, and spawn the
+/// connection driver task.
+async fn pg_raw_connect(
+    pg_config: &tokio_postgres::Config,
+    ssl: bool,
+) -> Result<tokio_postgres::Client, String> {
+    if ssl {
+        let tls = pg_tls_connector()?;
+        let (client, connection) = pg_config.connect(tls).await.map_err(e_str)?;
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("PostgreSQL connection error: {}", sanitize_error(&e.to_string()));
+            }
+        });
+        Ok(client)
+    } else {
+        let (client, connection) = pg_config.connect(tokio_postgres::NoTls).await.map_err(e_str)?;
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("PostgreSQL connection error: {}", sanitize_error(&e.to_string()));
+            }
+        });
+        Ok(client)
+    }
+}
 
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("PostgreSQL connection error: {}", e);
-        }
-    });
+/// Get a cached PostgreSQL client for config (+ optional database override).
+async fn pg_client(
+    config: &serde_json::Value,
+    database: Option<&str>,
+) -> Result<std::sync::Arc<tokio_postgres::Client>, String> {
+    let qualifier = database.unwrap_or("");
+    let key = conn_manager::config_key("pg", config, qualifier);
+    let config = config.clone();
+    let db_owned = database.map(|s| s.to_string());
+    conn_manager::get_pg_client(&key, move || {
+        Box::pin(async move {
+            let mut pg_config = build_pg_config(&config);
+            if let Some(db) = db_owned {
+                if !db.is_empty() {
+                    pg_config.dbname(db);
+                }
+            }
+            pg_raw_connect(&pg_config, wants_ssl(&config)).await
+        })
+    })
+    .await
+}
+
+async fn test_postgresql(config: &serde_json::Value) -> Result<String, String> {
+    let client = pg_client(config, None).await?;
 
     let row = client
         .query_one("SELECT version()", &[])
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(e_str)?;
     let version: String = row.get(0);
     Ok(format!("PostgreSQL: {}", version.split_whitespace().take(2).collect::<Vec<_>>().join(" ")))
 }
 
 async fn list_postgresql(config: &serde_json::Value) -> Result<Vec<DatabaseResult>, String> {
-    let pg_config = build_pg_config(config);
-    let (client, connection) = pg_config
-        .connect(tokio_postgres::NoTls)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("PostgreSQL connection error: {}", e);
-        }
-    });
+    let client = pg_client(config, None).await?;
 
     let rows = client
         .query(
@@ -256,7 +407,7 @@ async fn list_postgresql(config: &serde_json::Value) -> Result<Vec<DatabaseResul
             &[],
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(e_str)?;
 
     let mut databases = Vec::new();
     for row in rows {
@@ -377,18 +528,25 @@ fn build_mongodb_uri(config: &serde_json::Value, db_type: &str) -> String {
     }
 }
 
-async fn test_mongodb(db_type: &str, config: &serde_json::Value) -> Result<String, String> {
+/// Get a cached MongoDB client for this config.
+async fn mongo_client(db_type: &str, config: &serde_json::Value) -> Result<mongodb::Client, String> {
+    let key = conn_manager::config_key("mongo", config, db_type);
     let uri = build_mongodb_uri(config, db_type);
-    let client_options = mongodb::options::ClientOptions::parse(&uri)
-        .await
-        .map_err(|e| e.to_string())?;
-    let client = mongodb::Client::with_options(client_options).map_err(|e| e.to_string())?;
+    conn_manager::get_mongo_client(&key, async move {
+        let client_options = mongodb::options::ClientOptions::parse(&uri).await.map_err(e_str)?;
+        mongodb::Client::with_options(client_options).map_err(e_str)
+    })
+    .await
+}
+
+async fn test_mongodb(db_type: &str, config: &serde_json::Value) -> Result<String, String> {
+    let client = mongo_client(db_type, config).await?;
 
     client
         .database("admin")
         .run_command(mongodb::bson::doc! { "ping": 1 }, None)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(e_str)?;
 
     Ok("MongoDB connected successfully".to_string())
 }
@@ -397,16 +555,12 @@ async fn list_mongodb(
     db_type: &str,
     config: &serde_json::Value,
 ) -> Result<Vec<DatabaseResult>, String> {
-    let uri = build_mongodb_uri(config, db_type);
-    let client_options = mongodb::options::ClientOptions::parse(&uri)
-        .await
-        .map_err(|e| e.to_string())?;
-    let client = mongodb::Client::with_options(client_options).map_err(|e| e.to_string())?;
+    let client = mongo_client(db_type, config).await?;
 
     let db_names = client
         .list_database_names(None, None)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(e_str)?;
 
     let mut databases = Vec::new();
     for db_name in db_names {
@@ -435,17 +589,19 @@ async fn list_mongodb(
 
 // ─── Redis ────────────────────────────────────────────────────────
 
-fn build_redis_url(config: &serde_json::Value) -> String {
-    if let Some(uri) = config["connectionString"].as_str() {
-        if !uri.is_empty() {
-            return uri.to_string();
+fn build_redis_url(config: &serde_json::Value, db_override: Option<u64>) -> String {
+    if db_override.is_none() {
+        if let Some(uri) = config["connectionString"].as_str() {
+            if !uri.is_empty() {
+                return uri.to_string();
+            }
         }
     }
 
     let host = config["host"].as_str().unwrap_or("localhost");
     let port = config["port"].as_u64().unwrap_or(6379);
     let pass = config["password"].as_str().unwrap_or("");
-    let db = config["dbNumber"].as_u64().unwrap_or(0);
+    let db = db_override.unwrap_or_else(|| config["dbNumber"].as_u64().unwrap_or(0));
 
     if !pass.is_empty() {
         format!("redis://:{}@{}:{}/{}", pass, host, port, db)
@@ -454,19 +610,47 @@ fn build_redis_url(config: &serde_json::Value) -> String {
     }
 }
 
+/// Get a cached Redis multiplexed connection for config (+ optional db).
+async fn redis_conn(
+    config: &serde_json::Value,
+    db: Option<u64>,
+) -> Result<redis::aio::MultiplexedConnection, String> {
+    let qualifier = db.map(|d| d.to_string()).unwrap_or_default();
+    let key = conn_manager::config_key("redis", config, &qualifier);
+    let url = build_redis_url(config, db);
+    conn_manager::get_redis_conn(&key, async move {
+        let client = redis::Client::open(url.as_str()).map_err(e_str)?;
+        client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(e_str)
+    })
+    .await
+}
+
+fn redis_value_to_json(val: &redis::Value) -> serde_json::Value {
+    match val {
+        redis::Value::Nil => serde_json::Value::Null,
+        redis::Value::Int(i) => serde_json::Value::Number((*i).into()),
+        redis::Value::Data(b) => {
+            serde_json::Value::String(String::from_utf8_lossy(b).to_string())
+        }
+        redis::Value::Bulk(items) => serde_json::Value::Array(
+            items.iter().map(redis_value_to_json).collect(),
+        ),
+        redis::Value::Status(s) => serde_json::Value::String(s.clone()),
+        redis::Value::Okay => serde_json::Value::String("OK".to_string()),
+    }
+}
+
 async fn test_redis(config: &serde_json::Value) -> Result<String, String> {
-    let url = build_redis_url(config);
-    let client = redis::Client::open(url.as_str()).map_err(|e| e.to_string())?;
-    let mut con = client
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut con = redis_conn(config, None).await?;
 
     let info: String = redis::cmd("INFO")
         .arg("server")
         .query_async(&mut con)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(e_str)?;
 
     let version = info
         .lines()
@@ -479,18 +663,13 @@ async fn test_redis(config: &serde_json::Value) -> Result<String, String> {
 }
 
 async fn list_redis(config: &serde_json::Value) -> Result<Vec<DatabaseResult>, String> {
-    let url = build_redis_url(config);
-    let client = redis::Client::open(url.as_str()).map_err(|e| e.to_string())?;
-    let mut con = client
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut con = redis_conn(config, None).await?;
 
     let info: String = redis::cmd("INFO")
         .arg("keyspace")
         .query_async(&mut con)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(e_str)?;
 
     let mut databases = Vec::new();
 
@@ -566,18 +745,11 @@ async fn exec_query_mysql(
     query: &str,
     database: Option<&str>,
 ) -> Result<QueryResultData, String> {
-    let mut url = build_mysql_url(config);
-    if let Some(db) = database {
-        if !db.is_empty() && !url.contains('/') {
-            url.push('/');
-            url.push_str(db);
-        }
-    }
-    let pool = mysql_async::Pool::new(url.as_str());
-    let mut conn = pool.get_conn().await.map_err(|e| e.to_string())?;
+    let pool = mysql_pool(config, database).await?;
+    let mut conn = pool.get_conn().await.map_err(e_str)?;
 
     let start = std::time::Instant::now();
-    let mut result = conn.query_iter(query).await.map_err(|e| e.to_string())?;
+    let mut result = conn.query_iter(query).await.map_err(e_str)?;
 
     let columns: Vec<String> = result
         .columns()
@@ -585,7 +757,7 @@ async fn exec_query_mysql(
         .unwrap_or_default();
 
     let mut rows = Vec::new();
-    let result_set: Vec<mysql_async::Row> = result.collect().await.map_err(|e| e.to_string())?;
+    let result_set: Vec<mysql_async::Row> = result.collect().await.map_err(e_str)?;
     for mut row in result_set {
         let mut json_row = serde_json::Map::new();
         for (i, col) in columns.iter().enumerate() {
@@ -597,7 +769,6 @@ async fn exec_query_mysql(
 
     let affected = conn.affected_rows();
     let duration = start.elapsed().as_millis() as u64;
-    conn.disconnect().await.map_err(|e| e.to_string())?;
 
     Ok(QueryResultData {
         row_count: rows.len(),
@@ -615,40 +786,27 @@ async fn exec_query_postgresql(
     query: &str,
     database: Option<&str>,
 ) -> Result<QueryResultData, String> {
-    let mut pg_config = build_pg_config(config);
-    if let Some(db) = database {
-        if !db.is_empty() {
-            pg_config.dbname(db);
-        } else {
-            pg_config.dbname("postgres");
+    // Resolve target database: explicit param > config database > "postgres"
+    let db_override: Option<String> = match database {
+        Some(db) if !db.is_empty() => Some(db.to_string()),
+        Some(_) => Some("postgres".to_string()),
+        None => {
+            let cfg_db = config["database"].as_str().unwrap_or("");
+            if cfg_db.is_empty() { Some("postgres".to_string()) } else { None }
         }
-    } else {
-        // Default to postgres database if no database specified
-        let cfg_db = config["database"].as_str().unwrap_or("");
-        if cfg_db.is_empty() {
-            pg_config.dbname("postgres");
-        }
-    }
-    let (client, connection) = pg_config
-        .connect(tokio_postgres::NoTls)
-        .await
-        .map_err(|e| e.to_string())?;
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("PostgreSQL connection error: {}", e);
-        }
-    });
+    };
+    let client = pg_client(config, db_override.as_deref()).await?;
 
     let start = std::time::Instant::now();
-    let query_lower = query.trim().to_lowercase();
 
-    if query_lower.starts_with("select") || query_lower.starts_with("with") || query_lower.starts_with("show") {
-        let rows = client.query(query, &[]).await.map_err(|e| e.to_string())?;
-        let columns: Vec<String> = if let Some(first) = rows.first() {
-            first.columns().iter().map(|c| c.name().to_string()).collect()
-        } else {
-            vec![]
-        };
+    // Detect whether the statement returns rows by preparing it:
+    // a prepared statement with columns produces a result set
+    // (handles comments, CTEs, DELETE ... RETURNING, etc.).
+    let stmt = client.prepare(query).await.map_err(e_str)?;
+
+    if !stmt.columns().is_empty() {
+        let rows = client.query(&stmt, &[]).await.map_err(e_str)?;
+        let columns: Vec<String> = stmt.columns().iter().map(|c| c.name().to_string()).collect();
 
         let mut json_rows = Vec::new();
         for row in &rows {
@@ -698,7 +856,7 @@ async fn exec_query_postgresql(
             rows: json_rows,
         })
     } else {
-        let affected = client.execute(query, &[]).await.map_err(|e| e.to_string())?;
+        let affected = client.execute(&stmt, &[]).await.map_err(e_str)?;
         let duration = start.elapsed().as_millis() as u64;
         Ok(QueryResultData {
             columns: vec![],
@@ -723,12 +881,13 @@ async fn exec_query_sqlite(
     let query = query.to_string();
 
     let result = tokio::task::spawn_blocking(move || -> Result<QueryResultData, String> {
-        let conn = rusqlite::Connection::open(&path).map_err(|e| e.to_string())?;
+        let conn = rusqlite::Connection::open(&path).map_err(e_str)?;
         let start = std::time::Instant::now();
 
-        let query_lower = query.trim().to_lowercase();
-        if query_lower.starts_with("select") || query_lower.starts_with("pragma") || query_lower.starts_with("with") {
-            let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+        // Detect result set via prepared statement columns (robust against
+        // leading comments, whitespace, RETURNING clauses, etc.)
+        let mut stmt = conn.prepare(&query).map_err(e_str)?;
+        if stmt.column_count() > 0 {
             let columns: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
             let column_count = columns.len();
 
@@ -748,7 +907,7 @@ async fn exec_query_sqlite(
                     map.insert(columns[i].clone(), json_val);
                 }
                 Ok(serde_json::Value::Object(map))
-            }).map_err(|e| e.to_string())?;
+            }).map_err(e_str)?;
 
             let mut rows = Vec::new();
             for row in rows_iter {
@@ -768,7 +927,8 @@ async fn exec_query_sqlite(
                 rows,
             })
         } else {
-            let affected = conn.execute(&query, []).map_err(|e| e.to_string())?;
+            drop(stmt);
+            let affected = conn.execute(&query, []).map_err(e_str)?;
             let duration = start.elapsed().as_millis() as u64;
             Ok(QueryResultData {
                 columns: vec![],
@@ -834,11 +994,7 @@ async fn exec_query_mongodb(
     query: &str,
     database: Option<&str>,
 ) -> Result<QueryResultData, String> {
-    let uri = build_mongodb_uri(config, db_type);
-    let client_options = mongodb::options::ClientOptions::parse(&uri)
-        .await
-        .map_err(|e| e.to_string())?;
-    let client = mongodb::Client::with_options(client_options).map_err(|e| e.to_string())?;
+    let client = mongo_client(db_type, config).await?;
 
     let db_name = database.unwrap_or("test");
     let start = std::time::Instant::now();
@@ -1144,30 +1300,106 @@ async fn exec_query_mongodb(
     duration_result
 }
 
+/// Quote-aware tokenizer for Redis commands.
+/// Supports single/double quotes and backslash escapes, e.g.
+/// `SET key "hello world"` or `SET key 'it''s ok'`.
+fn parse_redis_command(input: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_token = false;
+    let mut quote: Option<char> = None;
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) => match c {
+                '\\' if q == '"' => {
+                    // Inside double quotes, backslash escapes the next char
+                    if let Some(next) = chars.next() {
+                        let escaped = match next {
+                            'n' => '\n',
+                            't' => '\t',
+                            'r' => '\r',
+                            other => other,
+                        };
+                        current.push(escaped);
+                    }
+                }
+                c if c == q => {
+                    quote = None;
+                    // support '' inside single quotes as escaped quote
+                    if q == '\'' && chars.peek() == Some(&'\'') {
+                        chars.next();
+                        current.push('\'');
+                        quote = Some(q);
+                    }
+                }
+                _ => current.push(c),
+            },
+            None => match c {
+                '\'' | '"' => {
+                    quote = Some(c);
+                    in_token = true;
+                }
+                c if c.is_whitespace() => {
+                    if in_token {
+                        tokens.push(std::mem::take(&mut current));
+                        in_token = false;
+                    }
+                }
+                _ => {
+                    current.push(c);
+                    in_token = true;
+                }
+            },
+        }
+    }
+    if in_token || quote.is_some() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn redis_value_to_display(val: &redis::Value) -> String {
+    match val {
+        redis::Value::Nil => "(nil)".to_string(),
+        redis::Value::Int(i) => format!("(integer) {}", i),
+        redis::Value::Data(b) => format!("\"{}\"", String::from_utf8_lossy(b)),
+        redis::Value::Bulk(items) => {
+            if items.is_empty() {
+                return "(empty array)".to_string();
+            }
+            items
+                .iter()
+                .enumerate()
+                .map(|(i, v)| format!("{}) {}", i + 1, redis_value_to_display(v)))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        redis::Value::Status(s) => s.clone(),
+        redis::Value::Okay => "OK".to_string(),
+    }
+}
+
 async fn exec_query_redis(
     config: &serde_json::Value,
     query: &str,
 ) -> Result<QueryResultData, String> {
-    let url = build_redis_url(config);
-    let client = redis::Client::open(url.as_str()).map_err(|e| e.to_string())?;
-    let mut con = client
-        .get_multiplexed_async_connection()
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut con = redis_conn(config, None).await?;
 
     let start = std::time::Instant::now();
-    let parts: Vec<&str> = query.split_whitespace().collect();
+    let parts = parse_redis_command(query);
     if parts.is_empty() {
         return Err("Empty query".to_string());
     }
 
-    let mut cmd = redis::cmd(parts[0]);
+    let mut cmd = redis::cmd(&parts[0]);
     for part in &parts[1..] {
-        cmd.arg(*part);
+        cmd.arg(part);
     }
 
-    let result: redis::Value = cmd.query_async(&mut con).await.map_err(|e| e.to_string())?;
-    let result_str = format!("{:?}", result);
+    let result: redis::Value = cmd.query_async(&mut con).await.map_err(e_str)?;
+    let result_str = redis_value_to_display(&result);
     let duration = start.elapsed().as_millis() as u64;
 
     Ok(QueryResultData {
@@ -1179,6 +1411,171 @@ async fn exec_query_redis(
         success: true,
         error: None,
     })
+}
+
+// ─── Redis Key Browser ────────────────────────────────────────────
+
+/// Scan keys in a Redis database with an optional glob-style pattern.
+pub async fn redis_scan_keys_impl(
+    config: serde_json::Value,
+    database: Option<u64>,
+    pattern: Option<String>,
+    limit: Option<u64>,
+) -> Result<Vec<String>, String> {
+    let mut con = redis_conn(&config, database).await?;
+    let pattern = pattern.filter(|p| !p.is_empty()).unwrap_or_else(|| "*".to_string());
+    let limit = limit.unwrap_or(1000).min(10000) as usize;
+
+    let mut keys: Vec<String> = Vec::new();
+    let mut cursor: u64 = 0;
+    loop {
+        let (next, batch): (u64, Vec<String>) = redis::cmd("SCAN")
+            .arg(cursor)
+            .arg("MATCH")
+            .arg(&pattern)
+            .arg("COUNT")
+            .arg(200)
+            .query_async(&mut con)
+            .await
+            .map_err(e_str)?;
+        keys.extend(batch);
+        cursor = next;
+        if cursor == 0 || keys.len() >= limit {
+            break;
+        }
+    }
+    keys.truncate(limit);
+    keys.sort();
+    Ok(keys)
+}
+
+/// Read a single Redis key: returns type, TTL and value.
+pub async fn redis_get_key_impl(
+    config: serde_json::Value,
+    database: Option<u64>,
+    key: String,
+) -> Result<serde_json::Value, String> {
+    let mut con = redis_conn(&config, database).await?;
+
+    let key_type: String = redis::cmd("TYPE")
+        .arg(&key)
+        .query_async(&mut con)
+        .await
+        .map_err(e_str)?;
+    let ttl: i64 = redis::cmd("TTL")
+        .arg(&key)
+        .query_async(&mut con)
+        .await
+        .map_err(e_str)?;
+
+    let value: serde_json::Value = match key_type.as_str() {
+        "string" => {
+            let v: redis::Value = redis::cmd("GET")
+                .arg(&key)
+                .query_async(&mut con)
+                .await
+                .map_err(e_str)?;
+            redis_value_to_json(&v)
+        }
+        "hash" => {
+            let pairs: Vec<String> = redis::cmd("HGETALL")
+                .arg(&key)
+                .query_async(&mut con)
+                .await
+                .map_err(e_str)?;
+            let mut map = serde_json::Map::new();
+            for chunk in pairs.chunks(2) {
+                if chunk.len() == 2 {
+                    map.insert(chunk[0].clone(), serde_json::Value::String(chunk[1].clone()));
+                }
+            }
+            serde_json::Value::Object(map)
+        }
+        "list" => {
+            let v: redis::Value = redis::cmd("LRANGE")
+                .arg(&key)
+                .arg(0)
+                .arg(-1)
+                .query_async(&mut con)
+                .await
+                .map_err(e_str)?;
+            redis_value_to_json(&v)
+        }
+        "set" => {
+            let v: redis::Value = redis::cmd("SMEMBERS")
+                .arg(&key)
+                .query_async(&mut con)
+                .await
+                .map_err(e_str)?;
+            redis_value_to_json(&v)
+        }
+        "zset" => {
+            let v: redis::Value = redis::cmd("ZRANGE")
+                .arg(&key)
+                .arg(0)
+                .arg(-1)
+                .arg("WITHSCORES")
+                .query_async(&mut con)
+                .await
+                .map_err(e_str)?;
+            redis_value_to_json(&v)
+        }
+        "stream" => {
+            let v: redis::Value = redis::cmd("XRANGE")
+                .arg(&key)
+                .arg("-")
+                .arg("+")
+                .arg("COUNT")
+                .arg(100)
+                .query_async(&mut con)
+                .await
+                .map_err(e_str)?;
+            redis_value_to_json(&v)
+        }
+        other => serde_json::json!({ "unsupported_type": other }),
+    };
+
+    Ok(serde_json::json!({
+        "key": key,
+        "type": key_type,
+        "ttl": ttl,
+        "value": value,
+    }))
+}
+
+/// Delete one or more Redis keys. Returns the number of keys removed.
+pub async fn redis_delete_key_impl(
+    config: serde_json::Value,
+    database: Option<u64>,
+    keys: Vec<String>,
+) -> Result<u64, String> {
+    if keys.is_empty() {
+        return Ok(0);
+    }
+    let mut con = redis_conn(&config, database).await?;
+    let mut cmd = redis::cmd("DEL");
+    for k in &keys {
+        cmd.arg(k);
+    }
+    let deleted: u64 = cmd.query_async(&mut con).await.map_err(e_str)?;
+    Ok(deleted)
+}
+
+/// Set a string value for a Redis key (string type only).
+pub async fn redis_set_key_impl(
+    config: serde_json::Value,
+    database: Option<u64>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    let mut con = redis_conn(&config, database).await?;
+    let _: () = redis::cmd("SET")
+        .arg(&key)
+        .arg(&value)
+        .query_async(&mut con)
+        .await
+        .map_err(e_str)?;
+    Ok(())
 }
 
 // ─── Get Table Structure ──────────────────────────────────────────
@@ -1778,12 +2175,23 @@ async fn exec_query_duckdb(
     let query = query.to_string();
 
     let result = tokio::task::spawn_blocking(move || -> Result<QueryResultData, String> {
-        let conn = duckdb::Connection::open(&path).map_err(|e| e.to_string())?;
+        let conn = duckdb::Connection::open(&path).map_err(e_str)?;
         let start = std::time::Instant::now();
 
-        let query_lower = query.trim().to_lowercase();
-        if query_lower.starts_with("select") || query_lower.starts_with("with") || query_lower.starts_with("show") || query_lower.starts_with("describe") || query_lower.starts_with("pragma") {
-            let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+        // Detect result set via prepared statement columns; fall back to a
+        // keyword heuristic if the statement cannot be prepared.
+        let prepared = conn.prepare(&query);
+        let has_columns = match &prepared {
+            Ok(stmt) => !stmt.column_names().is_empty(),
+            Err(_) => {
+                let q = query.trim().to_lowercase();
+                q.starts_with("select") || q.starts_with("with") || q.starts_with("show")
+                    || q.starts_with("describe") || q.starts_with("pragma")
+            }
+        };
+
+        if has_columns {
+            let mut stmt = prepared.map_err(e_str)?;
             let columns: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
             let column_count = columns.len();
 
@@ -1815,7 +2223,7 @@ async fn exec_query_duckdb(
                     map.insert(columns[i].clone(), json_val);
                 }
                 Ok(serde_json::Value::Object(map))
-            }).map_err(|e| e.to_string())?;
+            }).map_err(e_str)?;
 
             let mut rows = Vec::new();
             for row in rows_iter {
@@ -1835,7 +2243,7 @@ async fn exec_query_duckdb(
                 rows,
             })
         } else {
-            let affected = conn.execute(&query, []).map_err(|e| e.to_string())?;
+            let affected = conn.execute(&query, []).map_err(e_str)?;
             let duration = start.elapsed().as_millis() as u64;
             Ok(QueryResultData {
                 columns: vec![],
@@ -1982,6 +2390,172 @@ async fn get_er_duckdb(config: &serde_json::Value) -> Result<ERDiagramData, Stri
     })
     .await
     .map_err(|e| e.to_string())??;
+
+    Ok(result)
+}
+
+// ─── DDL Export ───────────────────────────────────────────────────
+
+pub async fn get_table_ddl_impl(
+    db_type: &str,
+    config: serde_json::Value,
+    database: &str,
+    table: &str,
+) -> Result<String, String> {
+    match db_type {
+        "mysql" | "mariadb" => get_ddl_mysql(&config, database, table).await,
+        "postgresql" => get_ddl_postgresql(&config, database, table).await,
+        "sqlite" => get_ddl_sqlite(&config, table).await,
+        "duckdb" => get_ddl_duckdb(&config, table).await,
+        _ => Err(format!("DDL export not supported for: {}", db_type)),
+    }
+}
+
+async fn get_ddl_mysql(
+    config: &serde_json::Value,
+    database: &str,
+    table: &str,
+) -> Result<String, String> {
+    let pool = mysql_pool(config, Some(database)).await?;
+    let mut conn = pool.get_conn().await.map_err(e_str)?;
+
+    // Identifiers are escaped with backticks; embedded backticks are doubled.
+    let db_ident = format!("`{}`", database.replace('`', "``"));
+    let tbl_ident = format!("`{}`", table.replace('`', "``"));
+    let sql = format!("SHOW CREATE TABLE {}.{}", db_ident, tbl_ident);
+
+    let row: Option<mysql_async::Row> = conn
+        .query_first(sql)
+        .await
+        .map_err(e_str)?;
+    let row = row.ok_or_else(|| "No DDL returned".to_string())?;
+    // SHOW CREATE TABLE returns (Table, Create Table)
+    let ddl: String = row.get(1).ok_or_else(|| "Missing DDL column".to_string())?;
+    Ok(format!("{};", ddl))
+}
+
+async fn get_ddl_postgresql(
+    config: &serde_json::Value,
+    database: &str,
+    table: &str,
+) -> Result<String, String> {
+    let db_name = if database.is_empty() {
+        config["database"].as_str().unwrap_or("postgres").to_string()
+    } else {
+        database.to_string()
+    };
+    let schema = config["schema"].as_str().filter(|s| !s.is_empty()).unwrap_or("public");
+    let client = pg_client(config, Some(&db_name)).await?;
+
+    // Column definitions
+    let col_sql = r#"
+        SELECT
+            a.attname,
+            pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
+            NOT a.attnotnull AS nullable,
+            pg_catalog.pg_get_expr(d.adbin, d.adrelid) AS default_expr
+        FROM pg_catalog.pg_attribute a
+        LEFT JOIN pg_catalog.pg_attrdef d ON (a.attrelid, a.attnum) = (d.adrelid, d.adnum)
+        WHERE a.attrelid = ($1 || '.' || $2)::regclass
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+        ORDER BY a.attnum
+    "#;
+    let rows = client.query(col_sql, &[&schema, &table]).await.map_err(e_str)?;
+    if rows.is_empty() {
+        return Err(format!("Table {}.{} not found", schema, table));
+    }
+
+    // Primary key columns
+    let pk_sql = r#"
+        SELECT a.attname
+        FROM pg_catalog.pg_index i
+        JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+        WHERE i.indrelid = ($1 || '.' || $2)::regclass AND i.indisprimary
+        ORDER BY array_position(i.indkey, a.attnum)
+    "#;
+    let pk_rows = client.query(pk_sql, &[&schema, &table]).await.map_err(e_str)?;
+    let pk_cols: Vec<String> = pk_rows.iter().map(|r| r.get::<_, String>(0)).collect();
+
+    let mut lines: Vec<String> = Vec::new();
+    for row in &rows {
+        let name: String = row.get(0);
+        let dtype: String = row.get(1);
+        let nullable: bool = row.get(2);
+        let default_expr: Option<String> = row.get(3);
+        let mut line = format!("    \"{}\" {}", name.replace('"', "\"\""), dtype);
+        if let Some(def) = default_expr {
+            line.push_str(&format!(" DEFAULT {}", def));
+        }
+        if !nullable {
+            line.push_str(" NOT NULL");
+        }
+        lines.push(line);
+    }
+    if !pk_cols.is_empty() {
+        let cols = pk_cols
+            .iter()
+            .map(|c| format!("\"{}\"", c.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!("    PRIMARY KEY ({})", cols));
+    }
+
+    Ok(format!(
+        "CREATE TABLE \"{}\".\"{}\" (\n{}\n);",
+        schema.replace('"', "\"\""),
+        table.replace('"', "\"\""),
+        lines.join(",\n")
+    ))
+}
+
+async fn get_ddl_sqlite(config: &serde_json::Value, table: &str) -> Result<String, String> {
+    let path = config["filePath"]
+        .as_str()
+        .ok_or("File path is required")?
+        .to_string();
+    let table = table.to_string();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let conn = rusqlite::Connection::open(&path).map_err(e_str)?;
+        let ddl: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(e_str)?;
+        ddl.map(|d| format!("{};", d))
+            .ok_or_else(|| "Table not found".to_string())
+    })
+    .await
+    .map_err(e_str)??;
+
+    Ok(result)
+}
+
+async fn get_ddl_duckdb(config: &serde_json::Value, table: &str) -> Result<String, String> {
+    let path = config["filePath"]
+        .as_str()
+        .ok_or("File path is required")?
+        .to_string();
+    let table = table.to_string();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let conn = duckdb::Connection::open(&path).map_err(e_str)?;
+        let mut stmt = conn
+            .prepare("SELECT sql FROM duckdb_tables() WHERE table_name = ?")
+            .map_err(e_str)?;
+        let ddl: Option<String> = stmt
+            .query_row([table.as_str()], |row| row.get::<_, String>(0))
+            .optional()
+            .map_err(e_str)?;
+        ddl.map(|d| format!("{};", d))
+            .ok_or_else(|| "Table not found".to_string())
+    })
+    .await
+    .map_err(e_str)??;
 
     Ok(result)
 }

@@ -7,6 +7,7 @@ import { ScrollArea } from '../ui/ScrollArea';
 import { Badge } from '../ui/Badge';
 import { CheckCircle, XCircle, Loader2, Table2, MessageSquare, BarChart3 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { ResultChart } from './ResultChart';
 
 interface ResultPanelProps {
   results: QueryResult[];
@@ -49,6 +50,7 @@ export function ResultPanel({ results, isExecuting }: ResultPanelProps) {
         <Tabs
           tabs={[
             { id: 'results', label: t('editor.results'), icon: <Table2 size={12} /> },
+            { id: 'chart', label: t('editor.chart'), icon: <BarChart3 size={12} /> },
             { id: 'messages', label: t('editor.messages'), icon: <MessageSquare size={12} /> },
             { id: 'plan', label: t('editor.executionPlan'), icon: <BarChart3 size={12} /> },
           ]}
@@ -57,6 +59,7 @@ export function ResultPanel({ results, isExecuting }: ResultPanelProps) {
         />
         <div ref={dragScrollRef} className="flex-1 min-h-0 overflow-auto cursor-grab">
           {activeTab === 'results' && <ResultTable result={results[0]} />}
+          {activeTab === 'chart' && <ResultChart result={results[0]} />}
           {activeTab === 'messages' && <MessagesTab result={results[0]} />}
           {activeTab === 'plan' && <PlanTab />}
         </div>
@@ -117,6 +120,7 @@ export function ResultPanel({ results, isExecuting }: ResultPanelProps) {
       <Tabs
         tabs={[
           { id: 'results', label: t('editor.results'), icon: <Table2 size={12} /> },
+          { id: 'chart', label: t('editor.chart'), icon: <BarChart3 size={12} /> },
           { id: 'messages', label: t('editor.messages'), icon: <MessageSquare size={12} /> },
           { id: 'plan', label: t('editor.executionPlan'), icon: <BarChart3 size={12} /> },
         ]}
@@ -127,6 +131,7 @@ export function ResultPanel({ results, isExecuting }: ResultPanelProps) {
       {/* Tab content */}
       <div ref={dragScrollRef} className="flex-1 min-h-0 overflow-auto cursor-grab">
         {activeTab === 'results' && <ResultTable result={currentResult} />}
+        {activeTab === 'chart' && <ResultChart result={currentResult} />}
         {activeTab === 'messages' && <MessagesTab result={currentResult} />}
         {activeTab === 'plan' && <PlanTab />}
       </div>

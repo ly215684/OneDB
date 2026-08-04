@@ -1,6 +1,6 @@
 import type { DatabaseType, QueryResult } from './connection';
 
-export type TabType = 'sql-editor' | 'table-data' | 'table-structure' | 'er-diagram' | 'mongodb-docs' | 'welcome';
+export type TabType = 'sql-editor' | 'table-data' | 'table-structure' | 'er-diagram' | 'mongodb-docs' | 'redis-keys' | 'welcome';
 
 export interface Tab {
   id: string;

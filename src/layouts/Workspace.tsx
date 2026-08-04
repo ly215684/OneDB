@@ -8,6 +8,7 @@ import { DataTableView } from '../components/table/DataTableView';
 import { ERDiagram } from '../components/er/ERDiagram';
 import { TableStructureEditor } from '../components/structure/StructureEditor';
 import { MongoDBDocBrowser } from '../components/mongodb/MongoDBDocBrowser';
+import { RedisKeyBrowser } from '../components/redis/RedisKeyBrowser';
 import { ConnectionDialog } from '../components/connection/ConnectionDialog';
 import { SettingsDialog } from '../components/settings/SettingsDialog';
 import { ContextMenu } from '../components/ui/DropdownMenu';
@@ -232,6 +233,13 @@ function TabContent({ tab }: { tab: import('../types/tab').Tab }) {
       return (
         <MongoDBDocBrowser
           collectionName={tab.table || tab.title}
+          connectionId={tab.connectionId}
+          database={tab.database}
+        />
+      );
+    case 'redis-keys':
+      return (
+        <RedisKeyBrowser
           connectionId={tab.connectionId}
           database={tab.database}
         />
