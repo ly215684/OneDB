@@ -48,12 +48,11 @@ pub async fn open_tunnel(
     let config = Arc::new(config);
 
     // Connect to SSH server
-    let session = russh::client::connect(config, (ssh_host, ssh_port), ClientHandler)
+    let mut session = russh::client::connect(config, (ssh_host, ssh_port), ClientHandler)
         .await
         .map_err(|e| format!("SSH connect failed: {}", e))?;
-    let session = Arc::new(session);
 
-    // Authenticate
+    // Authenticate (must be done before wrapping in Arc, as methods need &mut self)
     let mut authenticated = false;
 
     if let Some(key_data) = ssh_private_key {
@@ -81,6 +80,9 @@ pub async fn open_tunnel(
     if !authenticated {
         return Err("SSH authentication failed".to_string());
     }
+
+    // Wrap in Arc after authentication (authenticate methods require &mut self)
+    let session = Arc::new(session);
 
     // Bind local port
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -127,7 +129,7 @@ async fn forward_connection(
 ) -> Result<(), String> {
     // Open a direct-tcpip channel through SSH
     let mut channel = session
-        .channel_open_direct_tcpip(remote_host, remote_port, "127.0.0.1", 0)
+        .channel_open_direct_tcpip(remote_host, remote_port as u32, "127.0.0.1", 0)
         .await
         .map_err(|e| format!("Channel open failed: {}", e))?;
 
