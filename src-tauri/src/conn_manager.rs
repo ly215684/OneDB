@@ -59,6 +59,32 @@ fn manager() -> &'static DashMap<String, Arc<Entry>> {
     })
 }
 
+/// Shut down all cached connections and SSH tunnels.
+///
+/// Must be called on application exit, while the tokio runtime is still alive.
+/// Clearing the cache drops every `Entry`, which in turn:
+///  - drops the MySQL/PostgreSQL/Redis/MongoDB connection handles, closing
+///    their underlying TCP connections so the servers can release the sessions
+///    promptly instead of waiting for a keepalive timeout;
+///  - drops each `SSHTunnel`'s `shutdown_tx` oneshot sender. Closing the
+///    channel resolves the receiver in the tunnel's accept loop, breaking the
+///    loop and tearing down the SSH session and local listener cleanly.
+///
+/// A short sleep follows so the spawned tunnel tasks get a chance to observe
+/// the shutdown signal and exit before the runtime is torn down.
+pub async fn shutdown_all() {
+    if let Some(m) = MANAGER.get() {
+        // Drain all entries. `clear` drops every `Arc<Entry>` held by the map;
+        // if a command is still in flight it may hold its own `Arc` clone, but
+        // once those finish the entries will be fully released.
+        m.clear();
+    }
+    // Yield + brief wait so spawned SSH tunnel accept loops can observe the
+    // dropped shutdown senders and break out before the runtime shuts down.
+    tokio::task::yield_now().await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+}
+
 /// Derive a stable cache key from the connection config and optional qualifier
 /// (e.g. database name). The key never contains secrets in readable form.
 pub fn config_key(prefix: &str, config: &serde_json::Value, qualifier: &str) -> String {

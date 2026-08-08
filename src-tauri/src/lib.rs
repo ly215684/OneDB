@@ -132,6 +132,14 @@ pub fn run() {
             redis_delete_key,
             redis_set_key,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            // On exit, close all cached DB connections and SSH tunnels while
+            // the tokio runtime is still alive. Without this, SSH tunnels and
+            // server-side sessions are left to time out after the process ends.
+            if let tauri::RunEvent::Exit = event {
+                tauri::async_runtime::block_on(conn_manager::shutdown_all());
+            }
+        });
 }
